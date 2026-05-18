@@ -1,0 +1,19 @@
+# Config exclusiva do perfil "test" (ativado por @ActiveProfiles("test")).
+# Datasource vem do Testcontainers via @ServiceConnection — nada a declarar aqui.
+
+app:
+  jwt:
+    # Chave HMAC fake — usada APENAS em testes. 256 bits base64.
+    secret: dGVzdC1zZWNyZXQta2V5LWZvci10ZXN0aW5nLW9ubHktbmV2ZXItdXNlLWluLXByb2QtZW52aXJvbm1lbnRz
+    expiration-ms: 3600000
+  osrm:
+    base-url: http://osrm-mock.invalid
+  ride:
+    bandeira: 5.50
+    preco-por-km: 2.10
+    preco-por-min: 0.20
+
+logging:
+  level:
+    org.testcontainers: INFO
+    com.github.dockerjava: WARN

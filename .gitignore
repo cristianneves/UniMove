@@ -83,6 +83,9 @@ jacoco.exec
 *.exec
 .sonar/
 
+# ----- Claude Code (estado local) -----
+.claude/
+
 # ----- Outros -----
 *.bak
 *.swp
