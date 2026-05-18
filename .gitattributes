@@ -1,0 +1,33 @@
+# Normalização de fim de linha — checkout LF em todos os SOs, evita ruído em diff
+* text=auto eol=lf
+
+# Scripts Windows precisam de CRLF
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+*.ps1       text eol=crlf
+
+# Scripts Unix sempre LF
+*.sh        text eol=lf
+
+# Arquivos de código (LF explícito)
+*.java      text eol=lf diff=java
+*.xml       text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.json      text eol=lf
+*.properties text eol=lf
+*.sql       text eol=lf
+*.md        text eol=lf
+
+# Binários — git nunca tenta converter line endings
+*.jar       binary
+*.war       binary
+*.class     binary
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.pdf       binary
+*.zip       binary
+*.gz        binary
