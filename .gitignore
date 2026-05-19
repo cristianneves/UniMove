@@ -8,13 +8,13 @@ release.properties
 dependency-reduced-pom.xml
 buildNumber.properties
 .mvn/timing.properties
-.mvn/wrapper/maven-wrapper.jar
 
 CLAUDE.md
 
 # ----- Compilado -----
 *.class
 *.jar
+!.mvn/wrapper/maven-wrapper.jar
 *.war
 *.ear
 *.nar
