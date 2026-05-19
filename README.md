@@ -62,11 +62,11 @@ Monolito modular por dominio (detalhes em `CLAUDE.md`):
 
 ```
 com.unimove
-├── domain.user       Auth, registro, roles, JWT
-├── domain.ride       Mural, maquina de estados, tarifa
-├── domain.maps       Gateway OSRM (interface MapsService)
-├── domain.payment    Simulacao Pix + Dinheiro
-└── shared            Config, security, exception handler, utils
+├── domain.user       Auth, registro, roles, JWT                       [implementado]
+├── domain.maps       Gateway OSRM + cache de rotas (MapsService)      [implementado]
+├── domain.ride       Mural, maquina de estados, tarifa                [pendente]
+├── domain.payment    Simulacao Pix + Dinheiro                         [pendente]
+└── shared            Config, security, exception handler, utils       [implementado]
 ```
 
 ---
@@ -98,4 +98,27 @@ Veja `.env.example` para o template completo.
 
 ## Status do MVP
 
-Em desenvolvimento inicial. Setup do repositorio concluido; proximo passo: `pom.xml` + estrutura de pacotes + `V1__init_schema.sql`.
+Em desenvolvimento incremental. Implementacao por dominio, na ordem de dependencia (folhas primeiro):
+
+| Bloco                       | Status        | Observacoes |
+|-----------------------------|---------------|-------------|
+| Scaffold (pom, profiles)    | concluido     | Spring Boot 3.3.5 + Java 21 |
+| Schema inicial (`V1`)       | concluido     | users, drivers, rides (com `@Version`), route_cache |
+| `shared` (security, JWT, exception handler) | concluido | `GlobalExceptionHandler` cobre validacao, lock otimista, `BusinessException` |
+| `domain.user`               | concluido     | `/auth/register`, `/auth/login`, roles PASSAGEIRO/MOTORISTA/ADMIN |
+| `domain.maps`               | concluido     | `MapsService` + `OsrmMapsService` (cache-aside via `route_cache`) |
+| `domain.payment`            | proximo       | Payload Pix fictício; transicao PENDING_PAYMENT → AVAILABLE_IN_MURAL |
+| `domain.ride`               | pendente      | Nucleo do MVP: criacao, mural, aceite (lock otimista), maquina de estados, polling |
+| Endpoints driver/admin      | pendente      | `/drivers/me/online|offline`, `/admin/drivers/{id}/approve` |
+
+### Testes
+
+21 testes passando (`mvn test`). Cobertura atual:
+
+- `AuthControllerWebMvcTest` (MockMvc) — fluxos de register/login
+- `JwtServiceTest` — emissao e validacao de token
+- `CityNormalizerTest` — normalizacao de cidade
+- `RouteHasherTest` — hash deterministico das rotas OSRM
+- `OsrmMapsServiceTest` — cache hit/miss, OSRM 5xx, payload vazio, race no insert
+
+> **Nota:** atualmente nao ha teste de integracao com Postgres real (Testcontainers) habilitado nesta maquina por bug do Docker Desktop. Quando resolvido, recriar coberturas de integracao para `AuthService` e adicionar para `MapsService` (mapping JPA real vs schema).
