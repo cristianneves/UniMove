@@ -4,9 +4,9 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
-import jakarta.persistence.MapsId;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 import lombok.Getter;
@@ -24,13 +24,13 @@ import java.util.UUID;
 public class Driver {
 
     @Id
-    @Column(name = "user_id", nullable = false, updatable = false)
-    private UUID userId;
-
-    @OneToOne(fetch = jakarta.persistence.FetchType.LAZY, optional = false)
-    @MapsId
+    @OneToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "user_id")
     private User user;
+
+    public UUID getUserId() {
+        return user != null ? user.getId() : null;
+    }
 
     @Column(name = "approved", nullable = false)
     private boolean approved;

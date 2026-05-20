@@ -3,10 +3,12 @@ package com.unimove.domain.user;
 import com.unimove.domain.user.dto.AuthResponse;
 import com.unimove.domain.user.dto.LoginRequest;
 import com.unimove.domain.user.dto.RegisterRequest;
+import com.unimove.shared.exception.BusinessException;
 import com.unimove.shared.security.JwtService;
 import com.unimove.shared.util.CityNormalizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -36,7 +38,12 @@ public class AuthService {
     public AuthResponse register(RegisterRequest req) {
         String email = req.email().trim().toLowerCase();
         if (userRepository.existsByEmail(email)) {
-            throw new EmailAlreadyUsedException(email);
+            throw new EmailAlreadyUsedException();
+        }
+
+        String cidade = CityNormalizer.normalize(req.cidade());
+        if (cidade.isEmpty()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Cidade inválida.");
         }
 
         User user = new User();
@@ -45,7 +52,7 @@ public class AuthService {
         user.setName(req.name().trim());
         user.setPhone(req.phone());
         user.setRole(req.role());
-        user.setCidade(CityNormalizer.normalize(req.cidade()));
+        user.setCidade(cidade);
         userRepository.save(user);
 
         if (req.role() == Role.MOTORISTA) {
@@ -54,7 +61,7 @@ public class AuthService {
             driver.setApproved(false);
             driver.setOnline(false);
             driver.setVehicleType(req.vehicleType());
-            driver.setVehiclePlate(req.vehiclePlate().toUpperCase());
+            driver.setVehiclePlate(req.vehiclePlate().trim().toUpperCase());
             driverRepository.save(driver);
         }
 

@@ -8,6 +8,7 @@ import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.security.SignatureException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.env.MockEnvironment;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -23,7 +24,17 @@ class JwtServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new JwtService(new JwtProperties(SECRET, 3_600_000));
+        service = newService(new JwtProperties(SECRET, 3_600_000));
+    }
+
+    private static JwtService newService(JwtProperties props, String... activeProfiles) {
+        MockEnvironment env = new MockEnvironment();
+        for (String p : activeProfiles) {
+            env.addActiveProfile(p);
+        }
+        JwtService s = new JwtService(props, env);
+        s.assertSecretSafeInProd();
+        return s;
     }
 
     @Test
@@ -47,7 +58,7 @@ class JwtServiceTest {
         User user = sampleUser(Role.MOTORISTA, "campinas");
         String token = service.generate(user).token();
 
-        JwtService otherService = new JwtService(new JwtProperties(
+        JwtService otherService = newService(new JwtProperties(
                 "b3RoZXItc2VjcmV0LWtleS1mb3ItdGVzdGluZy1vbmx5LW5ldmVyLXVzZS1pbi1wcm9kLWVudmlyb25tZW50cw==",
                 3_600_000
         ));
@@ -58,7 +69,7 @@ class JwtServiceTest {
 
     @Test
     void parseRejectsExpiredToken() throws InterruptedException {
-        JwtService shortLived = new JwtService(new JwtProperties(SECRET, 1));
+        JwtService shortLived = newService(new JwtProperties(SECRET, 1));
         String token = shortLived.generate(sampleUser(Role.PASSAGEIRO, "campinas")).token();
         Thread.sleep(50);
 
@@ -70,6 +81,20 @@ class JwtServiceTest {
     void parseRejectsMalformedToken() {
         assertThatThrownBy(() -> service.parse("nao-eh-um-jwt"))
                 .isInstanceOfAny(JwtException.class, IllegalArgumentException.class);
+    }
+
+    @Test
+    void failsFastWhenProdProfileUsesDevSecret() {
+        MockEnvironment prodEnv = new MockEnvironment();
+        prodEnv.addActiveProfile("prod");
+        JwtService unsafe = new JwtService(
+                new JwtProperties("dev-secret-NAO-USE-EM-PRODUCAO-troque-via-env-var", 3_600_000),
+                prodEnv
+        );
+
+        assertThatThrownBy(unsafe::assertSecretSafeInProd)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("JWT_SECRET");
     }
 
     private User sampleUser(Role role, String cidade) {
