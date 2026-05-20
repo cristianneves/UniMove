@@ -22,6 +22,7 @@ public record RideResponse(
         BigDecimal preco,
         RideStatus status,
         PaymentMethod paymentMethod,
+        String pixPayload,
         Instant createdAt
 ) {
     public static RideResponse from(Ride r) {
@@ -39,6 +40,7 @@ public record RideResponse(
                 r.getPreco(),
                 r.getStatus(),
                 r.getPaymentMethod(),
+                r.getPixPayload(),
                 r.getCreatedAt()
         );
     }

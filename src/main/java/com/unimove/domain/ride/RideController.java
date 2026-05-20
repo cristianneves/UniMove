@@ -1,5 +1,6 @@
 package com.unimove.domain.ride;
 
+import com.unimove.domain.ride.dto.ConfirmPaymentRequest;
 import com.unimove.domain.ride.dto.CreateRideRequest;
 import com.unimove.domain.ride.dto.RideResponse;
 import com.unimove.shared.security.AuthenticatedUser;
@@ -7,12 +8,14 @@ import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.net.URI;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/rides")
@@ -30,5 +33,13 @@ public class RideController {
                                                @Valid @RequestBody CreateRideRequest req) {
         RideResponse body = rideService.create(user, req);
         return ResponseEntity.created(URI.create("/rides/" + body.id())).body(body);
+    }
+
+    @PostMapping("/{id}/confirm-payment")
+    @PreAuthorize("hasRole('PASSAGEIRO')")
+    public RideResponse confirmPayment(@AuthenticationPrincipal AuthenticatedUser user,
+                                       @PathVariable UUID id,
+                                       @Valid @RequestBody ConfirmPaymentRequest req) {
+        return rideService.confirmPayment(user, id, req);
     }
 }

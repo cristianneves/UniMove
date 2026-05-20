@@ -2,6 +2,8 @@ package com.unimove.domain.ride;
 
 import com.unimove.domain.maps.MapsService;
 import com.unimove.domain.maps.RouteInfo;
+import com.unimove.domain.payment.PaymentService;
+import com.unimove.domain.ride.dto.ConfirmPaymentRequest;
 import com.unimove.domain.ride.dto.CreateRideRequest;
 import com.unimove.domain.ride.dto.RideResponse;
 import com.unimove.shared.security.AuthenticatedUser;
@@ -11,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.UUID;
 
 @Service
 public class RideService {
@@ -20,13 +23,16 @@ public class RideService {
     private final RideRepository rideRepository;
     private final MapsService mapsService;
     private final PricingPolicy pricingPolicy;
+    private final PaymentService paymentService;
 
     public RideService(RideRepository rideRepository,
                        MapsService mapsService,
-                       PricingPolicy pricingPolicy) {
+                       PricingPolicy pricingPolicy,
+                       PaymentService paymentService) {
         this.rideRepository = rideRepository;
         this.mapsService = mapsService;
         this.pricingPolicy = pricingPolicy;
+        this.paymentService = paymentService;
     }
 
     @Transactional
@@ -57,5 +63,28 @@ public class RideService {
                 saved.getId(), passageiro.userId(), saved.getCidade(), preco);
 
         return RideResponse.from(saved);
+    }
+
+    @Transactional
+    public RideResponse confirmPayment(AuthenticatedUser passageiro,
+                                       UUID rideId,
+                                       ConfirmPaymentRequest req) {
+        Ride ride = rideRepository.findById(rideId)
+                .orElseThrow(RideNotFoundException::new);
+
+        if (!ride.getPassageiroId().equals(passageiro.userId())) {
+            throw new RideAccessDeniedException();
+        }
+
+        RideStateMachine.assertCanTransition(ride.getStatus(), RideStatus.AVAILABLE_IN_MURAL);
+
+        ride.setPaymentMethod(req.method());
+        if (req.method() == PaymentMethod.PIX) {
+            ride.setPixPayload(paymentService.generatePixPayload(ride.getId(), ride.getPreco()));
+        }
+        ride.setStatus(RideStatus.AVAILABLE_IN_MURAL);
+
+        log.info("Ride {} confirmada ({}) → AVAILABLE_IN_MURAL", ride.getId(), req.method());
+        return RideResponse.from(ride);
     }
 }
