@@ -3,12 +3,10 @@ package com.unimove.domain.user;
 import com.unimove.domain.user.dto.AuthResponse;
 import com.unimove.domain.user.dto.LoginRequest;
 import com.unimove.domain.user.dto.RegisterRequest;
-import com.unimove.shared.exception.BusinessException;
 import com.unimove.shared.security.JwtService;
 import com.unimove.shared.util.CityNormalizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -43,7 +41,7 @@ public class AuthService {
 
         String cidade = CityNormalizer.normalize(req.cidade());
         if (cidade.isEmpty()) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Cidade inválida.");
+            throw new InvalidCityException();
         }
 
         User user = new User();
