@@ -8,9 +8,11 @@ import com.unimove.domain.ride.dto.ConfirmPaymentRequest;
 import com.unimove.domain.ride.dto.CreateRideRequest;
 import com.unimove.domain.ride.dto.RideMuralItem;
 import com.unimove.domain.ride.dto.RideResponse;
+import com.unimove.domain.ride.dto.UpdateDriverLocationRequest;
 import com.unimove.domain.user.DriverService;
 import com.unimove.domain.user.Role;
 import com.unimove.shared.security.AuthenticatedUser;
+import com.unimove.shared.util.Haversine;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -180,6 +182,41 @@ public class RideService {
         return RideResponse.from(ride);
     }
 
+    @Transactional
+    public RideResponse updateDriverLocation(AuthenticatedUser motorista,
+                                             UUID rideId,
+                                             UpdateDriverLocationRequest req) {
+        Ride ride = loadAsAcceptingDriver(motorista, rideId);
+
+        RideStatus s = ride.getStatus();
+        if (s != RideStatus.DRIVER_EN_ROUTE && s != RideStatus.IN_PROGRESS) {
+            throw new LocationUpdateNotAllowedException(s);
+        }
+
+        ride.setDriverCurrentLat(req.lat());
+        ride.setDriverCurrentLng(req.lng());
+        ride.setDriverLocationUpdatedAt(Instant.now());
+
+        return RideResponse.from(ride, computeDriverDistanceKm(ride));
+    }
+
+    @Transactional(readOnly = true)
+    public RideResponse get(AuthenticatedUser user, UUID rideId) {
+        Ride ride = rideRepository.findById(rideId)
+                .orElseThrow(RideNotFoundException::new);
+
+        boolean isPassenger = user.role() == Role.PASSAGEIRO
+                && ride.getPassageiroId().equals(user.userId());
+        boolean isAcceptingDriver = user.role() == Role.MOTORISTA
+                && user.userId().equals(ride.getMotoristaId());
+
+        if (!isPassenger && !isAcceptingDriver) {
+            throw new RideAccessDeniedException();
+        }
+
+        return RideResponse.from(ride, computeDriverDistanceKm(ride));
+    }
+
     private Ride loadAsAcceptingDriver(AuthenticatedUser motorista, UUID rideId) {
         Ride ride = rideRepository.findById(rideId)
                 .orElseThrow(RideNotFoundException::new);
@@ -187,5 +224,24 @@ public class RideService {
             throw new RideAccessDeniedException();
         }
         return ride;
+    }
+
+    /**
+     * DRIVER_EN_ROUTE: motorista → origem. IN_PROGRESS: motorista → destino.
+     * Sem localização do motorista, retorna null.
+     */
+    private BigDecimal computeDriverDistanceKm(Ride ride) {
+        if (ride.getDriverCurrentLat() == null || ride.getDriverCurrentLng() == null) {
+            return null;
+        }
+        return switch (ride.getStatus()) {
+            case DRIVER_EN_ROUTE -> Haversine.distanceKm(
+                    ride.getDriverCurrentLat(), ride.getDriverCurrentLng(),
+                    ride.getLatOrigem(), ride.getLngOrigem());
+            case IN_PROGRESS -> Haversine.distanceKm(
+                    ride.getDriverCurrentLat(), ride.getDriverCurrentLng(),
+                    ride.getLatDestino(), ride.getLngDestino());
+            default -> null;
+        };
     }
 }

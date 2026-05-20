@@ -24,6 +24,10 @@ public record RideResponse(
         RideStatus status,
         PaymentMethod paymentMethod,
         String pixPayload,
+        BigDecimal driverCurrentLat,
+        BigDecimal driverCurrentLng,
+        Instant driverLocationUpdatedAt,
+        BigDecimal driverDistanceKm,
         Instant createdAt,
         Instant acceptedAt,
         Instant startedAt,
@@ -33,6 +37,10 @@ public record RideResponse(
         String cancelReason
 ) {
     public static RideResponse from(Ride r) {
+        return from(r, null);
+    }
+
+    public static RideResponse from(Ride r, BigDecimal driverDistanceKm) {
         return new RideResponse(
                 r.getId(),
                 r.getPassageiroId(),
@@ -48,6 +56,10 @@ public record RideResponse(
                 r.getStatus(),
                 r.getPaymentMethod(),
                 r.getPixPayload(),
+                r.getDriverCurrentLat(),
+                r.getDriverCurrentLng(),
+                r.getDriverLocationUpdatedAt(),
+                driverDistanceKm,
                 r.getCreatedAt(),
                 r.getAcceptedAt(),
                 r.getStartedAt(),

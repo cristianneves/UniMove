@@ -5,6 +5,7 @@ import com.unimove.domain.ride.dto.ConfirmPaymentRequest;
 import com.unimove.domain.ride.dto.CreateRideRequest;
 import com.unimove.domain.ride.dto.RideMuralItem;
 import com.unimove.domain.ride.dto.RideResponse;
+import com.unimove.domain.ride.dto.UpdateDriverLocationRequest;
 import com.unimove.shared.security.AuthenticatedUser;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
@@ -13,6 +14,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -80,5 +82,20 @@ public class RideController {
                                @PathVariable UUID id,
                                @Valid @RequestBody(required = false) CancelRideRequest req) {
         return rideService.cancel(user, id, req);
+    }
+
+    @PutMapping("/{id}/driver-location")
+    @PreAuthorize("hasRole('MOTORISTA')")
+    public RideResponse updateDriverLocation(@AuthenticationPrincipal AuthenticatedUser user,
+                                             @PathVariable UUID id,
+                                             @Valid @RequestBody UpdateDriverLocationRequest req) {
+        return rideService.updateDriverLocation(user, id, req);
+    }
+
+    @GetMapping("/{id}")
+    @PreAuthorize("hasAnyRole('PASSAGEIRO', 'MOTORISTA')")
+    public RideResponse get(@AuthenticationPrincipal AuthenticatedUser user,
+                            @PathVariable UUID id) {
+        return rideService.get(user, id);
     }
 }
