@@ -1,6 +1,9 @@
 package com.unimove.domain.ride;
 
+import com.unimove.domain.ride.dto.AdminRideItem;
 import com.unimove.domain.ride.dto.RideMuralItem;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -21,4 +24,17 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
             ORDER BY r.createdAt ASC
             """)
     List<RideMuralItem> findMural(@Param("cidade") String cidade);
+
+    @Query(
+            value = """
+                    SELECT new com.unimove.domain.ride.dto.AdminRideItem(
+                        r.id, r.cidade, r.status, r.paymentMethod, r.preco,
+                        r.passageiroId, r.motoristaId,
+                        r.createdAt, r.acceptedAt, r.completedAt, r.cancelledAt
+                    )
+                    FROM Ride r
+                    """,
+            countQuery = "SELECT count(r) FROM Ride r"
+    )
+    Page<AdminRideItem> findAllForAdmin(Pageable pageable);
 }

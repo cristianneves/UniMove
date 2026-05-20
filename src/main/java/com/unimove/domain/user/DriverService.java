@@ -1,12 +1,14 @@
 package com.unimove.domain.user;
 
 import com.unimove.domain.user.dto.DriverStatusResponse;
+import com.unimove.domain.user.dto.PendingDriverItem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -58,5 +60,19 @@ public class DriverService {
         if (!d.isOnline()) {
             throw new DriverOfflineException();
         }
+    }
+
+    @Transactional(readOnly = true)
+    public List<PendingDriverItem> listPending() {
+        return driverRepository.findPending();
+    }
+
+    @Transactional
+    public DriverStatusResponse approve(UUID userId) {
+        Driver d = driverRepository.findById(userId)
+                .orElseThrow(DriverNotFoundException::new);
+        d.setApproved(true);
+        log.info("Driver {} aprovado pelo admin", userId);
+        return DriverStatusResponse.from(d);
     }
 }

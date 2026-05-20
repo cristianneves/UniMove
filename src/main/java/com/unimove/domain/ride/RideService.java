@@ -3,12 +3,15 @@ package com.unimove.domain.ride;
 import com.unimove.domain.maps.MapsService;
 import com.unimove.domain.maps.RouteInfo;
 import com.unimove.domain.payment.PaymentService;
+import com.unimove.domain.ride.dto.AdminRideItem;
 import com.unimove.domain.ride.dto.CancelRideRequest;
 import com.unimove.domain.ride.dto.ConfirmPaymentRequest;
 import com.unimove.domain.ride.dto.CreateRideRequest;
 import com.unimove.domain.ride.dto.RideMuralItem;
 import com.unimove.domain.ride.dto.RideResponse;
 import com.unimove.domain.ride.dto.UpdateDriverLocationRequest;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import com.unimove.domain.user.DriverService;
 import com.unimove.domain.user.Role;
 import com.unimove.shared.security.AuthenticatedUser;
@@ -215,6 +218,11 @@ public class RideService {
         }
 
         return RideResponse.from(ride, computeDriverDistanceKm(ride));
+    }
+
+    @Transactional(readOnly = true)
+    public Page<AdminRideItem> listAdminRides(Pageable pageable) {
+        return rideRepository.findAllForAdmin(pageable);
     }
 
     private Ride loadAsAcceptingDriver(AuthenticatedUser motorista, UUID rideId) {
