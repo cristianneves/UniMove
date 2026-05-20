@@ -47,4 +47,16 @@ public class DriverService {
     public void touchLastSeenAt(UUID userId) {
         driverRepository.updateLastSeenAt(userId, Instant.now());
     }
+
+    @Transactional(readOnly = true)
+    public void assertCanAcceptRides(UUID userId) {
+        Driver d = driverRepository.findById(userId)
+                .orElseThrow(DriverNotFoundException::new);
+        if (!d.isApproved()) {
+            throw new DriverNotApprovedException();
+        }
+        if (!d.isOnline()) {
+            throw new DriverOfflineException();
+        }
+    }
 }

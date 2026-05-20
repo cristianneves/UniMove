@@ -5,7 +5,9 @@ import com.unimove.domain.maps.RouteInfo;
 import com.unimove.domain.payment.PaymentService;
 import com.unimove.domain.ride.dto.ConfirmPaymentRequest;
 import com.unimove.domain.ride.dto.CreateRideRequest;
+import com.unimove.domain.ride.dto.RideMuralItem;
 import com.unimove.domain.ride.dto.RideResponse;
+import com.unimove.domain.user.DriverService;
 import com.unimove.shared.security.AuthenticatedUser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,6 +15,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -24,15 +28,18 @@ public class RideService {
     private final MapsService mapsService;
     private final PricingPolicy pricingPolicy;
     private final PaymentService paymentService;
+    private final DriverService driverService;
 
     public RideService(RideRepository rideRepository,
                        MapsService mapsService,
                        PricingPolicy pricingPolicy,
-                       PaymentService paymentService) {
+                       PaymentService paymentService,
+                       DriverService driverService) {
         this.rideRepository = rideRepository;
         this.mapsService = mapsService;
         this.pricingPolicy = pricingPolicy;
         this.paymentService = paymentService;
+        this.driverService = driverService;
     }
 
     @Transactional
@@ -85,6 +92,33 @@ public class RideService {
         ride.setStatus(RideStatus.AVAILABLE_IN_MURAL);
 
         log.info("Ride {} confirmada ({}) → AVAILABLE_IN_MURAL", ride.getId(), req.method());
+        return RideResponse.from(ride);
+    }
+
+    @Transactional(readOnly = true)
+    public List<RideMuralItem> listMural(AuthenticatedUser motorista) {
+        driverService.assertCanAcceptRides(motorista.userId());
+        return rideRepository.findMural(motorista.cidade());
+    }
+
+    @Transactional
+    public RideResponse accept(AuthenticatedUser motorista, UUID rideId) {
+        driverService.assertCanAcceptRides(motorista.userId());
+
+        Ride ride = rideRepository.findById(rideId)
+                .orElseThrow(RideNotFoundException::new);
+
+        if (!ride.getCidade().equals(motorista.cidade())) {
+            throw new DriverCityMismatchException();
+        }
+
+        RideStateMachine.assertCanTransition(ride.getStatus(), RideStatus.DRIVER_EN_ROUTE);
+
+        ride.setMotoristaId(motorista.userId());
+        ride.setStatus(RideStatus.DRIVER_EN_ROUTE);
+        ride.setAcceptedAt(Instant.now());
+
+        log.info("Ride {} aceita pelo motorista {}", ride.getId(), motorista.userId());
         return RideResponse.from(ride);
     }
 }
