@@ -3,11 +3,13 @@ package com.unimove.domain.ride;
 import com.unimove.domain.maps.MapsService;
 import com.unimove.domain.maps.RouteInfo;
 import com.unimove.domain.payment.PaymentService;
+import com.unimove.domain.ride.dto.CancelRideRequest;
 import com.unimove.domain.ride.dto.ConfirmPaymentRequest;
 import com.unimove.domain.ride.dto.CreateRideRequest;
 import com.unimove.domain.ride.dto.RideMuralItem;
 import com.unimove.domain.ride.dto.RideResponse;
 import com.unimove.domain.user.DriverService;
+import com.unimove.domain.user.Role;
 import com.unimove.shared.security.AuthenticatedUser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -120,5 +122,70 @@ public class RideService {
 
         log.info("Ride {} aceita pelo motorista {}", ride.getId(), motorista.userId());
         return RideResponse.from(ride);
+    }
+
+    @Transactional
+    public RideResponse start(AuthenticatedUser motorista, UUID rideId) {
+        Ride ride = loadAsAcceptingDriver(motorista, rideId);
+        RideStateMachine.assertCanTransition(ride.getStatus(), RideStatus.IN_PROGRESS);
+        ride.setStatus(RideStatus.IN_PROGRESS);
+        ride.setStartedAt(Instant.now());
+        log.info("Ride {} iniciada pelo motorista {}", ride.getId(), motorista.userId());
+        return RideResponse.from(ride);
+    }
+
+    @Transactional
+    public RideResponse complete(AuthenticatedUser motorista, UUID rideId) {
+        Ride ride = loadAsAcceptingDriver(motorista, rideId);
+        RideStateMachine.assertCanTransition(ride.getStatus(), RideStatus.COMPLETED);
+        ride.setStatus(RideStatus.COMPLETED);
+        ride.setCompletedAt(Instant.now());
+        log.info("Ride {} finalizada pelo motorista {}", ride.getId(), motorista.userId());
+        return RideResponse.from(ride);
+    }
+
+    @Transactional
+    public RideResponse cancel(AuthenticatedUser user, UUID rideId, CancelRideRequest req) {
+        Ride ride = rideRepository.findById(rideId)
+                .orElseThrow(RideNotFoundException::new);
+
+        String reason = req == null ? null : req.reason();
+
+        if (user.role() == Role.PASSAGEIRO) {
+            if (!ride.getPassageiroId().equals(user.userId())) {
+                throw new RideAccessDeniedException();
+            }
+            ride.setCancelledBy(CancelledBy.PASSAGEIRO);
+        } else if (user.role() == Role.MOTORISTA) {
+            if (!user.userId().equals(ride.getMotoristaId())) {
+                throw new RideAccessDeniedException();
+            }
+            if (ride.getStatus() != RideStatus.DRIVER_EN_ROUTE) {
+                throw new IllegalRideTransitionException(ride.getStatus(), RideStatus.CANCELLED);
+            }
+            if (reason == null || reason.isBlank()) {
+                throw new MissingCancelReasonException();
+            }
+            ride.setCancelledBy(CancelledBy.MOTORISTA);
+        } else {
+            throw new RideAccessDeniedException();
+        }
+
+        RideStateMachine.assertCanTransition(ride.getStatus(), RideStatus.CANCELLED);
+        ride.setStatus(RideStatus.CANCELLED);
+        ride.setCancelledAt(Instant.now());
+        ride.setCancelReason(reason);
+
+        log.info("Ride {} cancelada por {} (role={})", ride.getId(), user.userId(), user.role());
+        return RideResponse.from(ride);
+    }
+
+    private Ride loadAsAcceptingDriver(AuthenticatedUser motorista, UUID rideId) {
+        Ride ride = rideRepository.findById(rideId)
+                .orElseThrow(RideNotFoundException::new);
+        if (!motorista.userId().equals(ride.getMotoristaId())) {
+            throw new RideAccessDeniedException();
+        }
+        return ride;
     }
 }

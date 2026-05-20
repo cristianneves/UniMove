@@ -1,5 +1,6 @@
 package com.unimove.domain.ride.dto;
 
+import com.unimove.domain.ride.CancelledBy;
 import com.unimove.domain.ride.PaymentMethod;
 import com.unimove.domain.ride.Ride;
 import com.unimove.domain.ride.RideStatus;
@@ -23,7 +24,13 @@ public record RideResponse(
         RideStatus status,
         PaymentMethod paymentMethod,
         String pixPayload,
-        Instant createdAt
+        Instant createdAt,
+        Instant acceptedAt,
+        Instant startedAt,
+        Instant completedAt,
+        Instant cancelledAt,
+        CancelledBy cancelledBy,
+        String cancelReason
 ) {
     public static RideResponse from(Ride r) {
         return new RideResponse(
@@ -41,7 +48,13 @@ public record RideResponse(
                 r.getStatus(),
                 r.getPaymentMethod(),
                 r.getPixPayload(),
-                r.getCreatedAt()
+                r.getCreatedAt(),
+                r.getAcceptedAt(),
+                r.getStartedAt(),
+                r.getCompletedAt(),
+                r.getCancelledAt(),
+                r.getCancelledBy(),
+                r.getCancelReason()
         );
     }
 }
