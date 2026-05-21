@@ -7,6 +7,9 @@ import com.unimove.domain.ride.dto.AdminRideItem;
 import com.unimove.domain.ride.dto.CancelRideRequest;
 import com.unimove.domain.ride.dto.ConfirmPaymentRequest;
 import com.unimove.domain.ride.dto.CreateRideRequest;
+import com.unimove.domain.ride.dto.EarningsAggregate;
+import com.unimove.domain.ride.dto.EarningsDayItem;
+import com.unimove.domain.ride.dto.EarningsResponse;
 import com.unimove.domain.ride.dto.EstimateRequest;
 import com.unimove.domain.ride.dto.EstimateResponse;
 import com.unimove.domain.ride.dto.RatingResponse;
@@ -29,7 +32,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 
@@ -340,5 +346,40 @@ public class RideService {
                     ride.getLatDestino(), ride.getLngDestino());
             default -> null;
         };
+    }
+
+    @Transactional(readOnly = true)
+    public EarningsResponse getDriverEarnings(UUID driverId, LocalDate from, LocalDate to) {
+        LocalDate today = LocalDate.now(ZoneOffset.UTC);
+        LocalDate effectiveTo = (to != null) ? to : today;
+        LocalDate effectiveFrom = (from != null) ? from : effectiveTo.minusDays(29);
+
+        if (effectiveFrom.isAfter(effectiveTo)) {
+            throw new InvalidEarningsRangeException();
+        }
+
+        Instant fromInstant = effectiveFrom.atStartOfDay(ZoneOffset.UTC).toInstant();
+        Instant toInstantExclusive = effectiveTo.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant();
+
+        EarningsAggregate agg = rideRepository.sumDriverEarnings(driverId, fromInstant, toInstantExclusive);
+        long total = agg == null ? 0L : agg.totalRides();
+        BigDecimal gross = (agg == null || agg.grossEarnings() == null)
+                ? BigDecimal.ZERO
+                : agg.grossEarnings();
+
+        BigDecimal average = total == 0
+                ? BigDecimal.ZERO
+                : gross.divide(BigDecimal.valueOf(total), 2, RoundingMode.HALF_UP);
+
+        List<EarningsDayItem> byDay = rideRepository
+                .findDriverEarningsByDay(driverId, fromInstant, toInstantExclusive).stream()
+                .map(row -> new EarningsDayItem(
+                        row.getDay().toLocalDate(),
+                        row.getRides(),
+                        row.getGross() == null ? BigDecimal.ZERO : row.getGross()
+                ))
+                .toList();
+
+        return new EarningsResponse(effectiveFrom, effectiveTo, total, gross, average, byDay);
     }
 }
