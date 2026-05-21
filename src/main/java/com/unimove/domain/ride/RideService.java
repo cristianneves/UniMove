@@ -9,14 +9,18 @@ import com.unimove.domain.ride.dto.ConfirmPaymentRequest;
 import com.unimove.domain.ride.dto.CreateRideRequest;
 import com.unimove.domain.ride.dto.EstimateRequest;
 import com.unimove.domain.ride.dto.EstimateResponse;
+import com.unimove.domain.ride.dto.RatingResponse;
 import com.unimove.domain.ride.dto.RideHistoryItem;
 import com.unimove.domain.ride.dto.RideMuralItem;
 import com.unimove.domain.ride.dto.RideResponse;
+import com.unimove.domain.ride.dto.SubmitRatingRequest;
 import com.unimove.domain.ride.dto.UpdateDriverLocationRequest;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import com.unimove.domain.user.DriverService;
+import com.unimove.domain.user.RatingStats;
 import com.unimove.domain.user.Role;
+import com.unimove.domain.user.UserRatingService;
 import com.unimove.shared.security.AuthenticatedUser;
 import com.unimove.shared.util.Haversine;
 import org.slf4j.Logger;
@@ -35,21 +39,27 @@ public class RideService {
     private static final Logger log = LoggerFactory.getLogger(RideService.class);
 
     private final RideRepository rideRepository;
+    private final RideRatingRepository rideRatingRepository;
     private final MapsService mapsService;
     private final PricingPolicy pricingPolicy;
     private final PaymentService paymentService;
     private final DriverService driverService;
+    private final UserRatingService userRatingService;
 
     public RideService(RideRepository rideRepository,
+                       RideRatingRepository rideRatingRepository,
                        MapsService mapsService,
                        PricingPolicy pricingPolicy,
                        PaymentService paymentService,
-                       DriverService driverService) {
+                       DriverService driverService,
+                       UserRatingService userRatingService) {
         this.rideRepository = rideRepository;
+        this.rideRatingRepository = rideRatingRepository;
         this.mapsService = mapsService;
         this.pricingPolicy = pricingPolicy;
         this.paymentService = paymentService;
         this.driverService = driverService;
+        this.userRatingService = userRatingService;
     }
 
     @Transactional(readOnly = true)
@@ -232,12 +242,67 @@ public class RideService {
             throw new RideAccessDeniedException();
         }
 
-        return RideResponse.from(ride, computeDriverDistanceKm(ride));
+        BigDecimal motoristaAvg = null;
+        Integer motoristaCount = null;
+        if (ride.getMotoristaId() != null) {
+            RatingStats stats = userRatingService.getStats(ride.getMotoristaId());
+            motoristaAvg = stats.avg();
+            motoristaCount = stats.count();
+        }
+
+        return RideResponse.from(ride, computeDriverDistanceKm(ride), motoristaAvg, motoristaCount);
     }
 
     @Transactional(readOnly = true)
     public Page<AdminRideItem> listAdminRides(Pageable pageable) {
         return rideRepository.findAllForAdmin(pageable);
+    }
+
+    @Transactional
+    public RatingResponse submitRating(AuthenticatedUser user, UUID rideId, SubmitRatingRequest req) {
+        Ride ride = rideRepository.findById(rideId)
+                .orElseThrow(RideNotFoundException::new);
+
+        if (ride.getStatus() != RideStatus.COMPLETED) {
+            throw new RatingNotAllowedException(ride.getStatus());
+        }
+
+        UUID rateeId;
+        if (user.role() == Role.PASSAGEIRO && ride.getPassageiroId().equals(user.userId())) {
+            rateeId = ride.getMotoristaId();
+        } else if (user.role() == Role.MOTORISTA && user.userId().equals(ride.getMotoristaId())) {
+            rateeId = ride.getPassageiroId();
+        } else {
+            throw new RideAccessDeniedException();
+        }
+
+        if (rideRatingRepository.existsByRideIdAndRaterId(rideId, user.userId())) {
+            throw new RatingAlreadySubmittedException();
+        }
+
+        RideRating rating = new RideRating();
+        rating.setRideId(rideId);
+        rating.setRaterId(user.userId());
+        rating.setRateeId(rateeId);
+        rating.setScore(req.score().shortValue());
+        rating.setComment(req.comment());
+        RideRating saved = rideRatingRepository.save(rating);
+
+        RatingStats stats = userRatingService.applyRating(rateeId, req.score());
+
+        log.info("Ride {} avaliada: rater={} ratee={} score={}", rideId, user.userId(), rateeId, req.score());
+
+        return new RatingResponse(
+                saved.getId(),
+                rideId,
+                user.userId(),
+                rateeId,
+                req.score(),
+                req.comment(),
+                saved.getCreatedAt(),
+                stats.avg(),
+                stats.count()
+        );
     }
 
     @Transactional(readOnly = true)

@@ -8,10 +8,14 @@ import com.unimove.domain.ride.dto.ConfirmPaymentRequest;
 import com.unimove.domain.ride.dto.CreateRideRequest;
 import com.unimove.domain.ride.dto.EstimateRequest;
 import com.unimove.domain.ride.dto.EstimateResponse;
+import com.unimove.domain.ride.dto.RatingResponse;
 import com.unimove.domain.ride.dto.RideResponse;
+import com.unimove.domain.ride.dto.SubmitRatingRequest;
 import com.unimove.domain.ride.dto.UpdateDriverLocationRequest;
 import com.unimove.domain.user.DriverService;
+import com.unimove.domain.user.RatingStats;
 import com.unimove.domain.user.Role;
+import com.unimove.domain.user.UserRatingService;
 import com.unimove.shared.security.AuthenticatedUser;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -50,10 +54,12 @@ import static org.mockito.Mockito.when;
 class RideServiceTest {
 
     @Mock RideRepository rideRepository;
+    @Mock RideRatingRepository rideRatingRepository;
     @Mock MapsService mapsService;
     @Mock PricingPolicy pricingPolicy;
     @Mock PaymentService paymentService;
     @Mock DriverService driverService;
+    @Mock UserRatingService userRatingService;
 
     @InjectMocks RideService rideService;
 
@@ -394,8 +400,14 @@ class RideServiceTest {
     void getEnforcesAccessControl() {
         Ride ride = rideEnRoute(pax.userId(), mot.userId());
         when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+        when(userRatingService.getStats(mot.userId()))
+                .thenReturn(new RatingStats(new BigDecimal("4.50"), 10));
 
-        assertThat(rideService.get(pax, ride.getId()).id()).isEqualTo(ride.getId());
+        RideResponse fromPax = rideService.get(pax, ride.getId());
+        assertThat(fromPax.id()).isEqualTo(ride.getId());
+        assertThat(fromPax.motoristaRatingAvg()).isEqualByComparingTo("4.50");
+        assertThat(fromPax.motoristaRatingCount()).isEqualTo(10);
+
         assertThat(rideService.get(mot, ride.getId()).id()).isEqualTo(ride.getId());
 
         AuthenticatedUser intruso = new AuthenticatedUser(UUID.randomUUID(),
@@ -412,6 +424,93 @@ class RideServiceTest {
 
         assertThatThrownBy(() -> rideService.get(pax, id))
                 .isInstanceOf(RideNotFoundException.class);
+    }
+
+    // ------------------------------------------------------------------------
+    // submitRating()
+    // ------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("submitRating: passageiro avalia motorista após COMPLETED")
+    void submitRatingByPassengerHappyPath() {
+        Ride ride = rideCompleted(pax.userId(), mot.userId());
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+        when(rideRatingRepository.existsByRideIdAndRaterId(ride.getId(), pax.userId())).thenReturn(false);
+        when(rideRatingRepository.save(any(RideRating.class))).thenAnswer(inv -> {
+            RideRating r = inv.getArgument(0);
+            if (r.getId() == null) r.setId(UUID.randomUUID());
+            if (r.getCreatedAt() == null) r.setCreatedAt(Instant.now());
+            return r;
+        });
+        when(userRatingService.applyRating(mot.userId(), 5))
+                .thenReturn(new RatingStats(new BigDecimal("4.80"), 25));
+
+        RatingResponse resp = rideService.submitRating(pax, ride.getId(),
+                new SubmitRatingRequest(5, "Excelente"));
+
+        assertThat(resp.raterId()).isEqualTo(pax.userId());
+        assertThat(resp.rateeId()).isEqualTo(mot.userId());
+        assertThat(resp.score()).isEqualTo(5);
+        assertThat(resp.comment()).isEqualTo("Excelente");
+        assertThat(resp.rateeNewRatingAvg()).isEqualByComparingTo("4.80");
+        assertThat(resp.rateeNewRatingCount()).isEqualTo(25);
+    }
+
+    @Test
+    @DisplayName("submitRating: motorista avalia passageiro após COMPLETED")
+    void submitRatingByDriverHappyPath() {
+        Ride ride = rideCompleted(pax.userId(), mot.userId());
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+        when(rideRatingRepository.existsByRideIdAndRaterId(ride.getId(), mot.userId())).thenReturn(false);
+        when(rideRatingRepository.save(any(RideRating.class))).thenAnswer(inv -> {
+            RideRating r = inv.getArgument(0);
+            if (r.getId() == null) r.setId(UUID.randomUUID());
+            if (r.getCreatedAt() == null) r.setCreatedAt(Instant.now());
+            return r;
+        });
+        when(userRatingService.applyRating(pax.userId(), 4))
+                .thenReturn(new RatingStats(new BigDecimal("4.20"), 3));
+
+        RatingResponse resp = rideService.submitRating(mot, ride.getId(),
+                new SubmitRatingRequest(4, null));
+
+        assertThat(resp.raterId()).isEqualTo(mot.userId());
+        assertThat(resp.rateeId()).isEqualTo(pax.userId());
+        assertThat(resp.score()).isEqualTo(4);
+    }
+
+    @Test
+    @DisplayName("submitRating antes de COMPLETED → RatingNotAllowedException")
+    void submitRatingBlockedBeforeCompleted() {
+        Ride ride = rideInProgress(pax.userId(), mot.userId());
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        assertThatThrownBy(() -> rideService.submitRating(pax, ride.getId(),
+                new SubmitRatingRequest(5, null)))
+                .isInstanceOf(RatingNotAllowedException.class);
+    }
+
+    @Test
+    @DisplayName("submitRating duplicado → RatingAlreadySubmittedException")
+    void submitRatingDuplicateFails() {
+        Ride ride = rideCompleted(pax.userId(), mot.userId());
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+        when(rideRatingRepository.existsByRideIdAndRaterId(ride.getId(), pax.userId())).thenReturn(true);
+
+        assertThatThrownBy(() -> rideService.submitRating(pax, ride.getId(),
+                new SubmitRatingRequest(5, null)))
+                .isInstanceOf(RatingAlreadySubmittedException.class);
+    }
+
+    @Test
+    @DisplayName("submitRating por parte não envolvida → RideAccessDeniedException")
+    void submitRatingByOtherUserFails() {
+        Ride ride = rideCompleted(pax.userId(), mot.userId());
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        assertThatThrownBy(() -> rideService.submitRating(outroPax, ride.getId(),
+                new SubmitRatingRequest(5, null)))
+                .isInstanceOf(RideAccessDeniedException.class);
     }
 
     // ------------------------------------------------------------------------
@@ -451,6 +550,13 @@ class RideServiceTest {
         Ride r = rideEnRoute(passageiroId, motoristaId);
         r.setStatus(RideStatus.IN_PROGRESS);
         r.setStartedAt(Instant.now());
+        return r;
+    }
+
+    private Ride rideCompleted(UUID passageiroId, UUID motoristaId) {
+        Ride r = rideInProgress(passageiroId, motoristaId);
+        r.setStatus(RideStatus.COMPLETED);
+        r.setCompletedAt(Instant.now());
         return r;
     }
 

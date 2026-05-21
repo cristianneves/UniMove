@@ -11,6 +11,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -47,6 +48,12 @@ public class User {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    @Column(name = "rating_avg", nullable = false)
+    private BigDecimal ratingAvg = BigDecimal.ZERO;
+
+    @Column(name = "rating_count", nullable = false)
+    private Integer ratingCount = 0;
+
     @PrePersist
     void onCreate() {
         if (id == null) {
@@ -54,6 +61,12 @@ public class User {
         }
         if (createdAt == null) {
             createdAt = Instant.now();
+        }
+        if (ratingAvg == null) {
+            ratingAvg = BigDecimal.ZERO;
+        }
+        if (ratingCount == null) {
+            ratingCount = 0;
         }
     }
 }

@@ -3,6 +3,7 @@ package com.unimove.domain.user.dto;
 import com.unimove.domain.user.Driver;
 import com.unimove.domain.user.VehicleType;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -12,7 +13,9 @@ public record DriverStatusResponse(
         boolean approved,
         Instant lastSeenAt,
         VehicleType vehicleType,
-        String vehiclePlate
+        String vehiclePlate,
+        BigDecimal ratingAvg,
+        Integer ratingCount
 ) {
     public static DriverStatusResponse from(Driver d) {
         return new DriverStatusResponse(
@@ -21,7 +24,9 @@ public record DriverStatusResponse(
                 d.isApproved(),
                 d.getLastSeenAt(),
                 d.getVehicleType(),
-                d.getVehiclePlate()
+                d.getVehiclePlate(),
+                d.getUser() != null ? d.getUser().getRatingAvg() : BigDecimal.ZERO,
+                d.getUser() != null ? d.getUser().getRatingCount() : 0
         );
     }
 }

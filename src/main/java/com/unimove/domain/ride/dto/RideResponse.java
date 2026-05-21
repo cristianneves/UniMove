@@ -28,6 +28,8 @@ public record RideResponse(
         BigDecimal driverCurrentLng,
         Instant driverLocationUpdatedAt,
         BigDecimal driverDistanceKm,
+        BigDecimal motoristaRatingAvg,
+        Integer motoristaRatingCount,
         Instant createdAt,
         Instant acceptedAt,
         Instant startedAt,
@@ -37,10 +39,17 @@ public record RideResponse(
         String cancelReason
 ) {
     public static RideResponse from(Ride r) {
-        return from(r, null);
+        return from(r, null, null, null);
     }
 
     public static RideResponse from(Ride r, BigDecimal driverDistanceKm) {
+        return from(r, driverDistanceKm, null, null);
+    }
+
+    public static RideResponse from(Ride r,
+                                    BigDecimal driverDistanceKm,
+                                    BigDecimal motoristaRatingAvg,
+                                    Integer motoristaRatingCount) {
         return new RideResponse(
                 r.getId(),
                 r.getPassageiroId(),
@@ -60,6 +69,8 @@ public record RideResponse(
                 r.getDriverCurrentLng(),
                 r.getDriverLocationUpdatedAt(),
                 driverDistanceKm,
+                motoristaRatingAvg,
+                motoristaRatingCount,
                 r.getCreatedAt(),
                 r.getAcceptedAt(),
                 r.getStartedAt(),

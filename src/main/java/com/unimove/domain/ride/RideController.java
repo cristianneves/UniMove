@@ -5,9 +5,11 @@ import com.unimove.domain.ride.dto.ConfirmPaymentRequest;
 import com.unimove.domain.ride.dto.CreateRideRequest;
 import com.unimove.domain.ride.dto.EstimateRequest;
 import com.unimove.domain.ride.dto.EstimateResponse;
+import com.unimove.domain.ride.dto.RatingResponse;
 import com.unimove.domain.ride.dto.RideHistoryItem;
 import com.unimove.domain.ride.dto.RideMuralItem;
 import com.unimove.domain.ride.dto.RideResponse;
+import com.unimove.domain.ride.dto.SubmitRatingRequest;
 import com.unimove.domain.ride.dto.UpdateDriverLocationRequest;
 import com.unimove.shared.security.AuthenticatedUser;
 import jakarta.validation.Valid;
@@ -118,5 +120,13 @@ public class RideController {
     public RideResponse get(@AuthenticationPrincipal AuthenticatedUser user,
                             @PathVariable UUID id) {
         return rideService.get(user, id);
+    }
+
+    @PostMapping("/{id}/rating")
+    @PreAuthorize("hasAnyRole('PASSAGEIRO', 'MOTORISTA')")
+    public RatingResponse submitRating(@AuthenticationPrincipal AuthenticatedUser user,
+                                       @PathVariable UUID id,
+                                       @Valid @RequestBody SubmitRatingRequest req) {
+        return rideService.submitRating(user, id, req);
     }
 }
