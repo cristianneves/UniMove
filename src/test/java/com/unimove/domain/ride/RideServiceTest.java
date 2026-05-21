@@ -6,6 +6,8 @@ import com.unimove.domain.payment.PaymentService;
 import com.unimove.domain.ride.dto.CancelRideRequest;
 import com.unimove.domain.ride.dto.ConfirmPaymentRequest;
 import com.unimove.domain.ride.dto.CreateRideRequest;
+import com.unimove.domain.ride.dto.EstimateRequest;
+import com.unimove.domain.ride.dto.EstimateResponse;
 import com.unimove.domain.ride.dto.RideResponse;
 import com.unimove.domain.ride.dto.UpdateDriverLocationRequest;
 import com.unimove.domain.user.DriverService;
@@ -97,6 +99,31 @@ class RideServiceTest {
         verify(rideRepository).save(saved.capture());
         assertThat(saved.getValue().getDistanciaKm()).isEqualByComparingTo("5.000");
         assertThat(saved.getValue().getTempoMin()).isEqualTo(12);
+    }
+
+    // ------------------------------------------------------------------------
+    // estimate()
+    // ------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("estimate: usa OSRM + PricingPolicy e NÃO persiste ride")
+    void estimateReturnsPriceWithoutPersisting() {
+        when(mapsService.route(anyDouble(), anyDouble(), anyDouble(), anyDouble()))
+                .thenReturn(new RouteInfo(new BigDecimal("3.500"), 9));
+        when(pricingPolicy.calculate(any(BigDecimal.class), eq(9)))
+                .thenReturn(new BigDecimal("14.65"));
+
+        EstimateResponse resp = rideService.estimate(new EstimateRequest(
+                new BigDecimal("-20.82000"),
+                new BigDecimal("-49.38000"),
+                new BigDecimal("-20.83000"),
+                new BigDecimal("-49.39000")
+        ));
+
+        assertThat(resp.distanciaKm()).isEqualByComparingTo("3.500");
+        assertThat(resp.tempoMin()).isEqualTo(9);
+        assertThat(resp.preco()).isEqualByComparingTo("14.65");
+        verify(rideRepository, never()).save(any(Ride.class));
     }
 
     // ------------------------------------------------------------------------

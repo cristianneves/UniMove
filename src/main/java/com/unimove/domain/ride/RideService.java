@@ -7,6 +7,9 @@ import com.unimove.domain.ride.dto.AdminRideItem;
 import com.unimove.domain.ride.dto.CancelRideRequest;
 import com.unimove.domain.ride.dto.ConfirmPaymentRequest;
 import com.unimove.domain.ride.dto.CreateRideRequest;
+import com.unimove.domain.ride.dto.EstimateRequest;
+import com.unimove.domain.ride.dto.EstimateResponse;
+import com.unimove.domain.ride.dto.RideHistoryItem;
 import com.unimove.domain.ride.dto.RideMuralItem;
 import com.unimove.domain.ride.dto.RideResponse;
 import com.unimove.domain.ride.dto.UpdateDriverLocationRequest;
@@ -47,6 +50,18 @@ public class RideService {
         this.pricingPolicy = pricingPolicy;
         this.paymentService = paymentService;
         this.driverService = driverService;
+    }
+
+    @Transactional(readOnly = true)
+    public EstimateResponse estimate(EstimateRequest req) {
+        RouteInfo route = mapsService.route(
+                req.latOrigem().doubleValue(),
+                req.lngOrigem().doubleValue(),
+                req.latDestino().doubleValue(),
+                req.lngDestino().doubleValue()
+        );
+        BigDecimal preco = pricingPolicy.calculate(route.distanciaKm(), route.tempoMin());
+        return new EstimateResponse(route.distanciaKm(), route.tempoMin(), preco);
     }
 
     @Transactional
@@ -223,6 +238,15 @@ public class RideService {
     @Transactional(readOnly = true)
     public Page<AdminRideItem> listAdminRides(Pageable pageable) {
         return rideRepository.findAllForAdmin(pageable);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<RideHistoryItem> history(AuthenticatedUser user, RideStatus status, Pageable pageable) {
+        return switch (user.role()) {
+            case PASSAGEIRO -> rideRepository.findHistoryForPassenger(user.userId(), status, pageable);
+            case MOTORISTA -> rideRepository.findHistoryForDriver(user.userId(), status, pageable);
+            default -> throw new RideAccessDeniedException();
+        };
     }
 
     private Ride loadAsAcceptingDriver(AuthenticatedUser motorista, UUID rideId) {

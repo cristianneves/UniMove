@@ -3,11 +3,17 @@ package com.unimove.domain.ride;
 import com.unimove.domain.ride.dto.CancelRideRequest;
 import com.unimove.domain.ride.dto.ConfirmPaymentRequest;
 import com.unimove.domain.ride.dto.CreateRideRequest;
+import com.unimove.domain.ride.dto.EstimateRequest;
+import com.unimove.domain.ride.dto.EstimateResponse;
+import com.unimove.domain.ride.dto.RideHistoryItem;
 import com.unimove.domain.ride.dto.RideMuralItem;
 import com.unimove.domain.ride.dto.RideResponse;
 import com.unimove.domain.ride.dto.UpdateDriverLocationRequest;
 import com.unimove.shared.security.AuthenticatedUser;
 import jakarta.validation.Valid;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -17,6 +23,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.net.URI;
@@ -41,6 +48,12 @@ public class RideController {
         return ResponseEntity.created(URI.create("/rides/" + body.id())).body(body);
     }
 
+    @PostMapping("/estimate")
+    @PreAuthorize("hasRole('PASSAGEIRO')")
+    public EstimateResponse estimate(@Valid @RequestBody EstimateRequest req) {
+        return rideService.estimate(req);
+    }
+
     @PostMapping("/{id}/confirm-payment")
     @PreAuthorize("hasRole('PASSAGEIRO')")
     public RideResponse confirmPayment(@AuthenticationPrincipal AuthenticatedUser user,
@@ -53,6 +66,14 @@ public class RideController {
     @PreAuthorize("hasRole('MOTORISTA')")
     public List<RideMuralItem> mural(@AuthenticationPrincipal AuthenticatedUser user) {
         return rideService.listMural(user);
+    }
+
+    @GetMapping("/history")
+    @PreAuthorize("hasAnyRole('PASSAGEIRO', 'MOTORISTA')")
+    public Page<RideHistoryItem> history(@AuthenticationPrincipal AuthenticatedUser user,
+                                         @RequestParam(required = false) RideStatus status,
+                                         @PageableDefault(size = 20) Pageable pageable) {
+        return rideService.history(user, status, pageable);
     }
 
     @PostMapping("/{id}/accept")
