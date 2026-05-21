@@ -15,7 +15,7 @@ App de mobilidade urbana (caronas + mototaxis) para cidades de pequeno porte. Ba
 - **Flyway** (migrations)
 - **OSRM** (API de mapas)
 - **JWT** (auth stateless)
-- **JUnit 5 + Testcontainers** (testes com Postgres real)
+- **JUnit 5 + Mockito** (testes unitários com mocks)
 
 ---
 
@@ -23,7 +23,7 @@ App de mobilidade urbana (caronas + mototaxis) para cidades de pequeno porte. Ba
 
 - JDK 21 ([Temurin](https://adoptium.net/) recomendado)
 - Maven 3.9+
-- Docker Desktop (para Postgres local e Testcontainers)
+- Docker Desktop (para o Postgres local via `docker compose`)
 
 ---
 
@@ -52,7 +52,7 @@ API sobe em `http://localhost:8080`. Migrations Flyway aplicam automaticamente n
 mvn test
 ```
 
-Testcontainers sobe um Postgres real para cada execucao — Docker precisa estar rodando. Nao usamos H2 para evitar divergencia de tipos com producao.
+Os testes sao unitarios (JUnit 5 + Mockito) e nao dependem de Postgres nem de Docker — rodam em segundos. Validacao com banco real e feita manualmente via `docs/smoke-test.md` + `docs/api.http`.
 
 ---
 
@@ -62,12 +62,22 @@ Monolito modular por dominio (detalhes em `CLAUDE.md`):
 
 ```
 com.unimove
-├── domain.user       Auth, registro, roles, JWT                       [implementado]
-├── domain.maps       Gateway OSRM + cache de rotas (MapsService)      [implementado]
-├── domain.ride       Mural, maquina de estados, tarifa                [pendente]
-├── domain.payment    Simulacao Pix + Dinheiro                         [pendente]
-└── shared            Config, security, exception handler, utils       [implementado]
+├── domain.user       Auth, registro, roles, JWT, driver online/offline, admin   [implementado]
+├── domain.maps       Gateway OSRM + cache de rotas (MapsService)                [implementado]
+├── domain.ride       Mural, maquina de estados, tarifa, polling                 [implementado]
+├── domain.payment    Simulacao Pix + Dinheiro (BR Code ficticio)                [implementado]
+└── shared            Config, security, exception handler, utils                 [implementado]
 ```
+
+---
+
+## Documentacao da API
+
+- **Swagger UI:** `http://localhost:8080/swagger-ui.html`
+- **OpenAPI JSON:** `http://localhost:8080/v3/api-docs`
+- **Coleção HTTP versionada:** [`docs/api.http`](./docs/api.http) — abre direto no IntelliJ HTTP Client ou VSCode REST Client.
+- **Smoke test ponta-a-ponta:** [`docs/smoke-test.md`](./docs/smoke-test.md) — checklist manual de ~10 min para validar release.
+- **Estado atual:** [`docs/estado-atual-projeto.md`](./docs/estado-atual-projeto.md).
 
 ---
 
@@ -98,27 +108,29 @@ Veja `.env.example` para o template completo.
 
 ## Status do MVP
 
-Em desenvolvimento incremental. Implementacao por dominio, na ordem de dependencia (folhas primeiro):
+Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.md` existem e respondem com as roles corretas. Veja `docs/estado-atual-projeto.md` para o diagnostico completo.
 
 | Bloco                       | Status        | Observacoes |
 |-----------------------------|---------------|-------------|
 | Scaffold (pom, profiles)    | concluido     | Spring Boot 3.3.5 + Java 21 |
 | Schema inicial (`V1`)       | concluido     | users, drivers, rides (com `@Version`), route_cache |
 | `shared` (security, JWT, exception handler) | concluido | `GlobalExceptionHandler` cobre validacao, lock otimista, `BusinessException` |
-| `domain.user`               | concluido     | `/auth/register`, `/auth/login`, roles PASSAGEIRO/MOTORISTA/ADMIN |
+| `domain.user`               | concluido     | `/auth/register`, `/auth/login`, online/offline, admin approve |
 | `domain.maps`               | concluido     | `MapsService` + `OsrmMapsService` (cache-aside via `route_cache`) |
-| `domain.payment`            | proximo       | Payload Pix fictício; transicao PENDING_PAYMENT → AVAILABLE_IN_MURAL |
-| `domain.ride`               | pendente      | Nucleo do MVP: criacao, mural, aceite (lock otimista), maquina de estados, polling |
-| Endpoints driver/admin      | pendente      | `/drivers/me/online|offline`, `/admin/drivers/{id}/approve` |
+| `domain.payment`            | concluido     | `SimulatedPaymentService` — BR Code ficticio (sem PSP real) |
+| `domain.ride`               | concluido     | Nucleo do MVP: criacao, mural, aceite (lock otimista), state machine, cancelamento por role, polling de localizacao |
+| OpenAPI / Swagger UI        | concluido     | `springdoc-openapi` em `/swagger-ui.html` |
+| Coleção HTTP / smoke test   | concluido     | `docs/api.http` + `docs/smoke-test.md` |
 
 ### Testes
 
-21 testes passando (`mvn test`). Cobertura atual:
+Cobertura atual (`mvn test`):
 
 - `AuthControllerWebMvcTest` (MockMvc) — fluxos de register/login
 - `JwtServiceTest` — emissao e validacao de token
 - `CityNormalizerTest` — normalizacao de cidade
 - `RouteHasherTest` — hash deterministico das rotas OSRM
 - `OsrmMapsServiceTest` — cache hit/miss, OSRM 5xx, payload vazio, race no insert
+- `RideServiceTest` (Mockito) — máquina de estados ponta-a-ponta, regras de role no cancelamento, gating do `driver-location`, delegação do mural para o repository, invariante de preço calculado no backend a partir do OSRM
 
-> **Nota:** atualmente nao ha teste de integracao com Postgres real (Testcontainers) habilitado nesta maquina por bug do Docker Desktop. Quando resolvido, recriar coberturas de integracao para `AuthService` e adicionar para `MapsService` (mapping JPA real vs schema).
+> **Lock otimista:** não é exercitado em unit test (depende do `@Version` do Hibernate em runtime). A garantia vem do schema (`rides.version`) + tradução de `ObjectOptimisticLockingFailureException` para HTTP 409 no `GlobalExceptionHandler`. Valide manualmente via `docs/smoke-test.md` seção 5 (aceite por dois motoristas).

@@ -75,9 +75,6 @@ application-secret.properties
 *.pem
 *.key
 
-# ----- Testcontainers / Docker -----
-.testcontainers.properties
-
 # ----- Cobertura / análise -----
 jacoco.exec
 *.exec

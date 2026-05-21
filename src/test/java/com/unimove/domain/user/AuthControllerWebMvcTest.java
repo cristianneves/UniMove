@@ -36,6 +36,7 @@ class AuthControllerWebMvcTest {
     @MockBean AuthService authService;
     @MockBean com.unimove.shared.security.JwtService jwtService;
     @MockBean com.unimove.shared.security.JwtAuthenticationFilter jwtAuthenticationFilter;
+    @MockBean DriverService driverService;
 
     @Test
     void registerReturns201WithBody() throws Exception {

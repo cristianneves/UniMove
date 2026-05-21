@@ -1,5 +1,5 @@
 # Config exclusiva do perfil "test" (ativado por @ActiveProfiles("test")).
-# Datasource vem do Testcontainers via @ServiceConnection — nada a declarar aqui.
+# Testes hoje são unitários (Mockito) ou @WebMvcTest — sem datasource.
 
 app:
   jwt:
@@ -12,8 +12,3 @@ app:
     bandeira: 5.50
     preco-por-km: 2.10
     preco-por-min: 0.20
-
-logging:
-  level:
-    org.testcontainers: INFO
-    com.github.dockerjava: WARN

@@ -1,0 +1,233 @@
+### UniMove — Coleção HTTP versionada
+### Compatível com IntelliJ HTTP Client e VSCode REST Client.
+### Variaveis @ guardam tokens entre requests. Substitua {{rideId}} e {{driverId}} conforme necessario.
+
+@host = http://localhost:8080
+@passageiroToken =
+@motoristaToken =
+@adminToken =
+@rideId =
+@driverId =
+
+###############################################################
+# 1. AUTH
+###############################################################
+
+### 1.1 Registrar passageiro
+# @name registerPassageiro
+POST {{host}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "passageiro1@unimove.local",
+  "password": "senha12345",
+  "name": "Passageiro Um",
+  "phone": "+5517999990001",
+  "role": "PASSAGEIRO",
+  "cidade": "sao-jose-do-rio-preto"
+}
+
+> {% client.global.set("passageiroToken", response.body.token); %}
+
+### 1.2 Registrar motorista (vai entrar como approved=false)
+# @name registerMotorista
+POST {{host}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "motorista1@unimove.local",
+  "password": "senha12345",
+  "name": "Motorista Um",
+  "phone": "+5517999990002",
+  "role": "MOTORISTA",
+  "cidade": "sao-jose-do-rio-preto",
+  "vehicleType": "MOTO",
+  "vehiclePlate": "ABC1D23"
+}
+
+> {% client.global.set("motoristaToken", response.body.token); %}
+
+### 1.3 Login admin (seed em V2__seed_admin.sql)
+# @name loginAdmin
+POST {{host}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@unimove.local",
+  "password": "admin123"
+}
+
+> {% client.global.set("adminToken", response.body.token); %}
+
+### 1.4 Login (caso ja exista cadastro)
+POST {{host}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "passageiro1@unimove.local",
+  "password": "senha12345"
+}
+
+
+###############################################################
+# 2. ADMIN — aprovacao de motorista
+###############################################################
+
+### 2.1 Listar motoristas pendentes
+GET {{host}}/admin/drivers/pending
+Authorization: Bearer {{adminToken}}
+
+### 2.2 Aprovar motorista (cole o id do passo 2.1)
+POST {{host}}/admin/drivers/{{driverId}}/approve
+Authorization: Bearer {{adminToken}}
+
+### 2.3 Listar todas as corridas (paginado)
+GET {{host}}/admin/rides?page=0&size=20
+Authorization: Bearer {{adminToken}}
+
+
+###############################################################
+# 3. MOTORISTA — status online/offline
+###############################################################
+
+### 3.1 Ficar online
+POST {{host}}/drivers/me/online
+Authorization: Bearer {{motoristaToken}}
+
+### 3.2 Ficar offline
+POST {{host}}/drivers/me/offline
+Authorization: Bearer {{motoristaToken}}
+
+
+###############################################################
+# 4. PASSAGEIRO — fluxo da corrida
+###############################################################
+
+### 4.1 Criar corrida (origem e destino em Sao Jose do Rio Preto)
+# @name createRide
+POST {{host}}/rides
+Authorization: Bearer {{passageiroToken}}
+Content-Type: application/json
+
+{
+  "latOrigem": -20.8113,
+  "lngOrigem": -49.3758,
+  "latDestino": -20.7969,
+  "lngDestino": -49.3589
+}
+
+> {% client.global.set("rideId", response.body.id); %}
+
+### 4.2 Confirmar pagamento — PIX (gera BR Code simulado)
+POST {{host}}/rides/{{rideId}}/confirm-payment
+Authorization: Bearer {{passageiroToken}}
+Content-Type: application/json
+
+{
+  "method": "PIX"
+}
+
+### 4.3 Confirmar pagamento — Dinheiro
+POST {{host}}/rides/{{rideId}}/confirm-payment
+Authorization: Bearer {{passageiroToken}}
+Content-Type: application/json
+
+{
+  "method": "DINHEIRO"
+}
+
+### 4.4 Polling do passageiro (a cada 5s pelo app)
+GET {{host}}/rides/{{rideId}}
+Authorization: Bearer {{passageiroToken}}
+
+### 4.5 Cancelar (passageiro pode cancelar em PENDING_PAYMENT, AVAILABLE_IN_MURAL ou DRIVER_EN_ROUTE)
+POST {{host}}/rides/{{rideId}}/cancel
+Authorization: Bearer {{passageiroToken}}
+Content-Type: application/json
+
+{
+  "reason": "Mudei de ideia"
+}
+
+
+###############################################################
+# 5. MOTORISTA — mural e ciclo de vida da corrida
+###############################################################
+
+### 5.1 Listar mural (filtrado por cidade do motorista; exige online + approved)
+GET {{host}}/rides/mural
+Authorization: Bearer {{motoristaToken}}
+
+### 5.2 Aceitar corrida (lock otimista; segundo motorista recebe 409)
+POST {{host}}/rides/{{rideId}}/accept
+Authorization: Bearer {{motoristaToken}}
+
+### 5.3 Atualizar localizacao do motorista (a cada ~10s entre DRIVER_EN_ROUTE e IN_PROGRESS)
+PUT {{host}}/rides/{{rideId}}/driver-location
+Authorization: Bearer {{motoristaToken}}
+Content-Type: application/json
+
+{
+  "lat": -20.8090,
+  "lng": -49.3720
+}
+
+### 5.4 Iniciar viagem (motorista chegou na origem)
+POST {{host}}/rides/{{rideId}}/start
+Authorization: Bearer {{motoristaToken}}
+
+### 5.5 Finalizar viagem (chegou no destino)
+POST {{host}}/rides/{{rideId}}/complete
+Authorization: Bearer {{motoristaToken}}
+
+### 5.6 Motorista cancela (somente em DRIVER_EN_ROUTE; reason obrigatorio)
+POST {{host}}/rides/{{rideId}}/cancel
+Authorization: Bearer {{motoristaToken}}
+Content-Type: application/json
+
+{
+  "reason": "Pneu furou"
+}
+
+
+###############################################################
+# 6. CASOS DE ERRO (uteis para validar GlobalExceptionHandler)
+###############################################################
+
+### 6.1 Sem token (espera 401)
+GET {{host}}/rides/mural
+
+### 6.2 Role errada — passageiro tentando ver mural (espera 403)
+GET {{host}}/rides/mural
+Authorization: Bearer {{passageiroToken}}
+
+### 6.3 Validacao — lat invalida (espera 400)
+POST {{host}}/rides
+Authorization: Bearer {{passageiroToken}}
+Content-Type: application/json
+
+{
+  "latOrigem": 999,
+  "lngOrigem": -49.3758,
+  "latDestino": -20.7969,
+  "lngDestino": -49.3589
+}
+
+### 6.4 Ride inexistente (espera 404)
+GET {{host}}/rides/00000000-0000-0000-0000-000000000000
+Authorization: Bearer {{passageiroToken}}
+
+### 6.5 Transicao invalida — completar uma ride PENDING_PAYMENT (espera 409)
+POST {{host}}/rides/{{rideId}}/complete
+Authorization: Bearer {{motoristaToken}}
+
+
+###############################################################
+# 7. SWAGGER / OPENAPI
+###############################################################
+
+### 7.1 OpenAPI JSON
+GET {{host}}/v3/api-docs
+
+### 7.2 Swagger UI (abrir no navegador)
+GET {{host}}/swagger-ui.html
