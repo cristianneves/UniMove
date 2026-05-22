@@ -62,11 +62,13 @@ Monolito modular por dominio (detalhes em `CLAUDE.md`):
 
 ```
 com.unimove
-├── domain.user       Auth, registro, roles, JWT, driver online/offline, admin   [implementado]
-├── domain.maps       Gateway OSRM + cache de rotas (MapsService)                [implementado]
-├── domain.ride       Mural, maquina de estados, tarifa, polling                 [implementado]
-├── domain.payment    Simulacao Pix + Dinheiro (BR Code ficticio)                [implementado]
-└── shared            Config, security, exception handler, utils                 [implementado]
+├── domain.user       Auth, JWT, driver online/offline, admin, favoritos, ratings  [implementado]
+├── domain.maps       Gateway OSRM + cache de rotas (MapsService)                  [implementado]
+├── domain.ride       Mural, maquina de estados, tarifa, polling, estimate,        [implementado]
+│                     rating bi, taxa de cancelamento, categorias MOTO/CARRO,
+│                     earnings do motorista
+├── domain.payment    Simulacao Pix + Dinheiro (BR Code ficticio)                  [implementado]
+└── shared            Config, security, exception handler, utils                   [implementado]
 ```
 
 ---
@@ -113,12 +115,18 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 | Bloco                       | Status        | Observacoes |
 |-----------------------------|---------------|-------------|
 | Scaffold (pom, profiles)    | concluido     | Spring Boot 3.3.5 + Java 21 |
-| Schema inicial (`V1`)       | concluido     | users, drivers, rides (com `@Version`), route_cache |
+| Schema (`V1`-`V6`)          | concluido     | users, drivers, rides (com `@Version`), route_cache, ride_ratings, saved_places, cancellation_fee, category |
 | `shared` (security, JWT, exception handler) | concluido | `GlobalExceptionHandler` cobre validacao, lock otimista, `BusinessException` |
-| `domain.user`               | concluido     | `/auth/register`, `/auth/login`, online/offline, admin approve |
+| `domain.user`               | concluido     | `/auth/*`, online/offline, admin approve, `/saved-places`, denormalizacao de rating em `users` |
 | `domain.maps`               | concluido     | `MapsService` + `OsrmMapsService` (cache-aside via `route_cache`) |
 | `domain.payment`            | concluido     | `SimulatedPaymentService` — BR Code ficticio (sem PSP real) |
-| `domain.ride`               | concluido     | Nucleo do MVP: criacao, mural, aceite (lock otimista), state machine, cancelamento por role, polling de localizacao |
+| `domain.ride`               | concluido     | Criacao, estimate, mural por cidade+categoria, aceite (lock otimista), state machine, cancelamento com taxa, polling, rating bi, earnings do motorista |
+| Estimativa de preço         | concluido     | `POST /rides/estimate` reusa OSRM + cache + `PricingPolicy` sem persistir |
+| Rating bidirecional         | concluido     | `POST /rides/{id}/rating`, denormalizacao `rating_avg`/`rating_count` em `users` |
+| Endereços favoritos         | concluido     | `POST/GET/DELETE /saved-places` (PASSAGEIRO) |
+| Earnings do motorista       | concluido     | `GET /drivers/me/earnings?from=&to=` com breakdown por dia |
+| Taxa de cancelamento        | concluido     | `CancellationPolicy` — R$ 3,00 após 120s de `DRIVER_EN_ROUTE` (passageiro) |
+| Categorias MOTO/CARRO       | concluido     | Matching server-side no mural + accept, multiplicador de preço por categoria |
 | OpenAPI / Swagger UI        | concluido     | `springdoc-openapi` em `/swagger-ui.html` |
 | Coleção HTTP / smoke test   | concluido     | `docs/api.http` + `docs/smoke-test.md` |
 
@@ -131,6 +139,8 @@ Cobertura atual (`mvn test`):
 - `CityNormalizerTest` — normalizacao de cidade
 - `RouteHasherTest` — hash deterministico das rotas OSRM
 - `OsrmMapsServiceTest` — cache hit/miss, OSRM 5xx, payload vazio, race no insert
-- `RideServiceTest` (Mockito) — máquina de estados ponta-a-ponta, regras de role no cancelamento, gating do `driver-location`, delegação do mural para o repository, invariante de preço calculado no backend a partir do OSRM
+- `RideServiceTest` (Mockito, 29 cenários) — máquina de estados ponta-a-ponta, regras de role no cancelamento, gating do `driver-location`, delegação do mural por cidade + categoria, invariante de preço calculado no backend a partir do OSRM, submitRating cross-role
+
+Total: **51 testes** passando em ~6 s (sem Docker/Postgres).
 
 > **Lock otimista:** não é exercitado em unit test (depende do `@Version` do Hibernate em runtime). A garantia vem do schema (`rides.version`) + tradução de `ObjectOptimisticLockingFailureException` para HTTP 409 no `GlobalExceptionHandler`. Valide manualmente via `docs/smoke-test.md` seção 5 (aceite por dois motoristas).
