@@ -19,19 +19,21 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
     @Query("""
             SELECT new com.unimove.domain.ride.dto.RideMuralItem(
                 r.id, r.latOrigem, r.lngOrigem, r.latDestino, r.lngDestino,
-                r.distanciaKm, r.tempoMin, r.preco, r.paymentMethod, r.createdAt
+                r.distanciaKm, r.tempoMin, r.preco, r.category, r.paymentMethod, r.createdAt
             )
             FROM Ride r
             WHERE r.status = com.unimove.domain.ride.RideStatus.AVAILABLE_IN_MURAL
               AND r.cidade = :cidade
+              AND r.category = :category
             ORDER BY r.createdAt ASC
             """)
-    List<RideMuralItem> findMural(@Param("cidade") String cidade);
+    List<RideMuralItem> findMural(@Param("cidade") String cidade,
+                                  @Param("category") RideCategory category);
 
     @Query(
             value = """
                     SELECT new com.unimove.domain.ride.dto.AdminRideItem(
-                        r.id, r.cidade, r.status, r.paymentMethod, r.preco,
+                        r.id, r.cidade, r.status, r.category, r.paymentMethod, r.preco, r.cancellationFee,
                         r.passageiroId, r.motoristaId,
                         r.createdAt, r.acceptedAt, r.completedAt, r.cancelledAt
                     )
@@ -44,9 +46,9 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
     @Query(
             value = """
                     SELECT new com.unimove.domain.ride.dto.RideHistoryItem(
-                        r.id, r.status, r.cidade,
+                        r.id, r.status, r.cidade, r.category,
                         r.latOrigem, r.lngOrigem, r.latDestino, r.lngDestino,
-                        r.distanciaKm, r.tempoMin, r.preco, r.paymentMethod,
+                        r.distanciaKm, r.tempoMin, r.preco, r.cancellationFee, r.paymentMethod,
                         r.passageiroId, r.motoristaId,
                         r.createdAt, r.completedAt, r.cancelledAt
                     )
@@ -68,9 +70,9 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
     @Query(
             value = """
                     SELECT new com.unimove.domain.ride.dto.RideHistoryItem(
-                        r.id, r.status, r.cidade,
+                        r.id, r.status, r.cidade, r.category,
                         r.latOrigem, r.lngOrigem, r.latDestino, r.lngDestino,
-                        r.distanciaKm, r.tempoMin, r.preco, r.paymentMethod,
+                        r.distanciaKm, r.tempoMin, r.preco, r.cancellationFee, r.paymentMethod,
                         r.passageiroId, r.motoristaId,
                         r.createdAt, r.completedAt, r.cancelledAt
                     )

@@ -63,6 +63,13 @@ public class DriverService {
     }
 
     @Transactional(readOnly = true)
+    public VehicleType getVehicleType(UUID userId) {
+        return driverRepository.findById(userId)
+                .map(Driver::getVehicleType)
+                .orElseThrow(DriverNotFoundException::new);
+    }
+
+    @Transactional(readOnly = true)
     public List<PendingDriverItem> listPending() {
         return driverRepository.findPending();
     }

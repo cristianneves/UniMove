@@ -3,6 +3,7 @@ package com.unimove.domain.ride.dto;
 import com.unimove.domain.ride.CancelledBy;
 import com.unimove.domain.ride.PaymentMethod;
 import com.unimove.domain.ride.Ride;
+import com.unimove.domain.ride.RideCategory;
 import com.unimove.domain.ride.RideStatus;
 
 import java.math.BigDecimal;
@@ -21,6 +22,7 @@ public record RideResponse(
         BigDecimal distanciaKm,
         Integer tempoMin,
         BigDecimal preco,
+        RideCategory category,
         RideStatus status,
         PaymentMethod paymentMethod,
         String pixPayload,
@@ -36,7 +38,8 @@ public record RideResponse(
         Instant completedAt,
         Instant cancelledAt,
         CancelledBy cancelledBy,
-        String cancelReason
+        String cancelReason,
+        BigDecimal cancellationFee
 ) {
     public static RideResponse from(Ride r) {
         return from(r, null, null, null);
@@ -62,6 +65,7 @@ public record RideResponse(
                 r.getDistanciaKm(),
                 r.getTempoMin(),
                 r.getPreco(),
+                r.getCategory(),
                 r.getStatus(),
                 r.getPaymentMethod(),
                 r.getPixPayload(),
@@ -77,7 +81,8 @@ public record RideResponse(
                 r.getCompletedAt(),
                 r.getCancelledAt(),
                 r.getCancelledBy(),
-                r.getCancelReason()
+                r.getCancelReason(),
+                r.getCancellationFee()
         );
     }
 }

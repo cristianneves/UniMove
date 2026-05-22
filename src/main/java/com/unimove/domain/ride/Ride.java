@@ -62,6 +62,10 @@ public class Ride {
     private BigDecimal preco;
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "category", nullable = false, length = 20)
+    private RideCategory category;
+
+    @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 30)
     private RideStatus status;
 
@@ -102,6 +106,9 @@ public class Ride {
 
     @Column(name = "cancel_reason", columnDefinition = "TEXT")
     private String cancelReason;
+
+    @Column(name = "cancellation_fee", precision = 10, scale = 2)
+    private BigDecimal cancellationFee;
 
     @PrePersist
     void onCreate() {

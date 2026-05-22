@@ -1,6 +1,7 @@
 package com.unimove.domain.ride.dto;
 
 import com.unimove.domain.ride.PaymentMethod;
+import com.unimove.domain.ride.RideCategory;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -15,6 +16,7 @@ public record RideMuralItem(
         BigDecimal distanciaKm,
         Integer tempoMin,
         BigDecimal preco,
+        RideCategory category,
         PaymentMethod paymentMethod,
         Instant createdAt
 ) {}

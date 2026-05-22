@@ -24,6 +24,7 @@ import com.unimove.domain.user.DriverService;
 import com.unimove.domain.user.RatingStats;
 import com.unimove.domain.user.Role;
 import com.unimove.domain.user.UserRatingService;
+import com.unimove.domain.user.VehicleType;
 import com.unimove.shared.security.AuthenticatedUser;
 import com.unimove.shared.util.Haversine;
 import org.slf4j.Logger;
@@ -48,6 +49,7 @@ public class RideService {
     private final RideRatingRepository rideRatingRepository;
     private final MapsService mapsService;
     private final PricingPolicy pricingPolicy;
+    private final CancellationPolicy cancellationPolicy;
     private final PaymentService paymentService;
     private final DriverService driverService;
     private final UserRatingService userRatingService;
@@ -56,6 +58,7 @@ public class RideService {
                        RideRatingRepository rideRatingRepository,
                        MapsService mapsService,
                        PricingPolicy pricingPolicy,
+                       CancellationPolicy cancellationPolicy,
                        PaymentService paymentService,
                        DriverService driverService,
                        UserRatingService userRatingService) {
@@ -63,6 +66,7 @@ public class RideService {
         this.rideRatingRepository = rideRatingRepository;
         this.mapsService = mapsService;
         this.pricingPolicy = pricingPolicy;
+        this.cancellationPolicy = cancellationPolicy;
         this.paymentService = paymentService;
         this.driverService = driverService;
         this.userRatingService = userRatingService;
@@ -76,7 +80,8 @@ public class RideService {
                 req.latDestino().doubleValue(),
                 req.lngDestino().doubleValue()
         );
-        BigDecimal preco = pricingPolicy.calculate(route.distanciaKm(), route.tempoMin());
+        RideCategory category = req.category() != null ? req.category() : RideCategory.CARRO;
+        BigDecimal preco = pricingPolicy.calculate(route.distanciaKm(), route.tempoMin(), category);
         return new EstimateResponse(route.distanciaKm(), route.tempoMin(), preco);
     }
 
@@ -89,11 +94,13 @@ public class RideService {
                 req.lngDestino().doubleValue()
         );
 
-        BigDecimal preco = pricingPolicy.calculate(route.distanciaKm(), route.tempoMin());
+        RideCategory category = req.category() != null ? req.category() : RideCategory.CARRO;
+        BigDecimal preco = pricingPolicy.calculate(route.distanciaKm(), route.tempoMin(), category);
 
         Ride ride = new Ride();
         ride.setPassageiroId(passageiro.userId());
         ride.setCidade(passageiro.cidade());
+        ride.setCategory(category);
         ride.setLatOrigem(req.latOrigem());
         ride.setLngOrigem(req.lngOrigem());
         ride.setLatDestino(req.latDestino());
@@ -104,8 +111,8 @@ public class RideService {
         ride.setStatus(RideStatus.PENDING_PAYMENT);
 
         Ride saved = rideRepository.save(ride);
-        log.info("Ride {} criada por passageiro {} (cidade={}, preco={})",
-                saved.getId(), passageiro.userId(), saved.getCidade(), preco);
+        log.info("Ride {} criada por passageiro {} (cidade={}, category={}, preco={})",
+                saved.getId(), passageiro.userId(), saved.getCidade(), category, preco);
 
         return RideResponse.from(saved);
     }
@@ -136,7 +143,8 @@ public class RideService {
     @Transactional(readOnly = true)
     public List<RideMuralItem> listMural(AuthenticatedUser motorista) {
         driverService.assertCanAcceptRides(motorista.userId());
-        return rideRepository.findMural(motorista.cidade());
+        VehicleType vt = driverService.getVehicleType(motorista.userId());
+        return rideRepository.findMural(motorista.cidade(), RideCategory.fromVehicleType(vt));
     }
 
     @Transactional
@@ -151,6 +159,12 @@ public class RideService {
         }
 
         RideStateMachine.assertCanTransition(ride.getStatus(), RideStatus.DRIVER_EN_ROUTE);
+
+        VehicleType vt = driverService.getVehicleType(motorista.userId());
+        RideCategory driverCategory = RideCategory.fromVehicleType(vt);
+        if (driverCategory != ride.getCategory()) {
+            throw new CategoryMismatchException(ride.getCategory(), driverCategory);
+        }
 
         ride.setMotoristaId(motorista.userId());
         ride.setStatus(RideStatus.DRIVER_EN_ROUTE);
@@ -186,6 +200,7 @@ public class RideService {
                 .orElseThrow(RideNotFoundException::new);
 
         String reason = req == null ? null : req.reason();
+        RideStatus statusBefore = ride.getStatus();
 
         if (user.role() == Role.PASSAGEIRO) {
             if (!ride.getPassageiroId().equals(user.userId())) {
@@ -208,11 +223,16 @@ public class RideService {
         }
 
         RideStateMachine.assertCanTransition(ride.getStatus(), RideStatus.CANCELLED);
+        Instant now = Instant.now();
+        BigDecimal fee = cancellationPolicy.computeFee(
+                user.role(), statusBefore, ride.getAcceptedAt(), now);
         ride.setStatus(RideStatus.CANCELLED);
-        ride.setCancelledAt(Instant.now());
+        ride.setCancelledAt(now);
         ride.setCancelReason(reason);
+        ride.setCancellationFee(fee.signum() > 0 ? fee : null);
 
-        log.info("Ride {} cancelada por {} (role={})", ride.getId(), user.userId(), user.role());
+        log.info("Ride {} cancelada por {} (role={}, fee={})",
+                ride.getId(), user.userId(), user.role(), ride.getCancellationFee());
         return RideResponse.from(ride);
     }
 

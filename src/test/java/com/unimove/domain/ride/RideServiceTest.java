@@ -16,6 +16,7 @@ import com.unimove.domain.user.DriverService;
 import com.unimove.domain.user.RatingStats;
 import com.unimove.domain.user.Role;
 import com.unimove.domain.user.UserRatingService;
+import com.unimove.domain.user.VehicleType;
 import com.unimove.shared.security.AuthenticatedUser;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -36,6 +37,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -57,6 +59,7 @@ class RideServiceTest {
     @Mock RideRatingRepository rideRatingRepository;
     @Mock MapsService mapsService;
     @Mock PricingPolicy pricingPolicy;
+    @Mock CancellationPolicy cancellationPolicy;
     @Mock PaymentService paymentService;
     @Mock DriverService driverService;
     @Mock UserRatingService userRatingService;
@@ -75,6 +78,10 @@ class RideServiceTest {
         pax = new AuthenticatedUser(UUID.randomUUID(), "pax@x.com", Role.PASSAGEIRO, CIDADE);
         mot = new AuthenticatedUser(UUID.randomUUID(), "mot@x.com", Role.MOTORISTA, CIDADE);
         outroPax = new AuthenticatedUser(UUID.randomUUID(), "other@x.com", Role.PASSAGEIRO, CIDADE);
+
+        lenient().when(driverService.getVehicleType(mot.userId())).thenReturn(VehicleType.CARRO);
+        lenient().when(cancellationPolicy.computeFee(any(), any(), any(), any()))
+                .thenReturn(BigDecimal.ZERO);
     }
 
     // ------------------------------------------------------------------------
@@ -86,7 +93,7 @@ class RideServiceTest {
     void createComputesPriceFromOsrmNotFromRequest() {
         when(mapsService.route(anyDouble(), anyDouble(), anyDouble(), anyDouble()))
                 .thenReturn(new RouteInfo(new BigDecimal("5.000"), 12));
-        when(pricingPolicy.calculate(any(BigDecimal.class), eq(12)))
+        when(pricingPolicy.calculate(any(BigDecimal.class), eq(12), any(RideCategory.class)))
                 .thenReturn(new BigDecimal("18.40"));
         when(rideRepository.save(any(Ride.class))).thenAnswer(inv -> {
             Ride r = inv.getArgument(0);
@@ -116,7 +123,7 @@ class RideServiceTest {
     void estimateReturnsPriceWithoutPersisting() {
         when(mapsService.route(anyDouble(), anyDouble(), anyDouble(), anyDouble()))
                 .thenReturn(new RouteInfo(new BigDecimal("3.500"), 9));
-        when(pricingPolicy.calculate(any(BigDecimal.class), eq(9)))
+        when(pricingPolicy.calculate(any(BigDecimal.class), eq(9), any(RideCategory.class)))
                 .thenReturn(new BigDecimal("14.65"));
 
         EstimateResponse resp = rideService.estimate(new EstimateRequest(
@@ -181,14 +188,14 @@ class RideServiceTest {
     // ------------------------------------------------------------------------
 
     @Test
-    @DisplayName("listMural delega para o repository com a cidade do motorista")
+    @DisplayName("listMural delega para o repository com a cidade + categoria do motorista")
     void listMuralCallsAuthThenRepositoryWithMotoristaCidade() {
-        when(rideRepository.findMural(CIDADE)).thenReturn(java.util.List.of());
+        when(rideRepository.findMural(CIDADE, RideCategory.CARRO)).thenReturn(java.util.List.of());
 
         rideService.listMural(mot);
 
         verify(driverService).assertCanAcceptRides(mot.userId());
-        verify(rideRepository).findMural(CIDADE);
+        verify(rideRepository).findMural(CIDADE, RideCategory.CARRO);
     }
 
     @Test
@@ -565,6 +572,7 @@ class RideServiceTest {
         r.setId(UUID.randomUUID());
         r.setPassageiroId(passageiroId);
         r.setCidade(cidade);
+        r.setCategory(RideCategory.CARRO);
         r.setLatOrigem(new BigDecimal("-20.82000"));
         r.setLngOrigem(new BigDecimal("-49.38000"));
         r.setLatDestino(new BigDecimal("-20.83000"));
