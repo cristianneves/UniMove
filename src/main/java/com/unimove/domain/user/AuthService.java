@@ -75,6 +75,9 @@ public class AuthService {
         if (!passwordEncoder.matches(req.password(), user.getPasswordHash())) {
             throw new BadCredentialsException("Credenciais inválidas");
         }
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            throw new UserSuspendedException();
+        }
         return issueToken(user);
     }
 

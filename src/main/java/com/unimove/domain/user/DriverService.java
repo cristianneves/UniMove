@@ -17,13 +17,17 @@ public class DriverService {
     private static final Logger log = LoggerFactory.getLogger(DriverService.class);
 
     private final DriverRepository driverRepository;
+    private final UserAccountService userAccountService;
 
-    public DriverService(DriverRepository driverRepository) {
+    public DriverService(DriverRepository driverRepository,
+                         UserAccountService userAccountService) {
         this.driverRepository = driverRepository;
+        this.userAccountService = userAccountService;
     }
 
     @Transactional
     public DriverStatusResponse goOnline(UUID userId) {
+        userAccountService.requireActive(userId);
         Driver d = driverRepository.findById(userId)
                 .orElseThrow(DriverNotFoundException::new);
         if (!d.isApproved()) {

@@ -54,6 +54,19 @@ public class User {
     @Column(name = "rating_count", nullable = false)
     private Integer ratingCount = 0;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 20)
+    private UserStatus status = UserStatus.ACTIVE;
+
+    @Column(name = "suspended_at")
+    private Instant suspendedAt;
+
+    @Column(name = "suspended_reason", length = 500)
+    private String suspendedReason;
+
+    @Column(name = "suspended_by_admin_id")
+    private UUID suspendedByAdminId;
+
     @PrePersist
     void onCreate() {
         if (id == null) {
@@ -67,6 +80,9 @@ public class User {
         }
         if (ratingCount == null) {
             ratingCount = 0;
+        }
+        if (status == null) {
+            status = UserStatus.ACTIVE;
         }
     }
 }

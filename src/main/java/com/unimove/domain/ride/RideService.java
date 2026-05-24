@@ -23,6 +23,7 @@ import org.springframework.data.domain.Pageable;
 import com.unimove.domain.user.DriverService;
 import com.unimove.domain.user.RatingStats;
 import com.unimove.domain.user.Role;
+import com.unimove.domain.user.UserAccountService;
 import com.unimove.domain.user.UserRatingService;
 import com.unimove.domain.user.VehicleType;
 import com.unimove.shared.security.AuthenticatedUser;
@@ -53,6 +54,7 @@ public class RideService {
     private final PaymentService paymentService;
     private final DriverService driverService;
     private final UserRatingService userRatingService;
+    private final UserAccountService userAccountService;
 
     public RideService(RideRepository rideRepository,
                        RideRatingRepository rideRatingRepository,
@@ -61,7 +63,8 @@ public class RideService {
                        CancellationPolicy cancellationPolicy,
                        PaymentService paymentService,
                        DriverService driverService,
-                       UserRatingService userRatingService) {
+                       UserRatingService userRatingService,
+                       UserAccountService userAccountService) {
         this.rideRepository = rideRepository;
         this.rideRatingRepository = rideRatingRepository;
         this.mapsService = mapsService;
@@ -70,6 +73,7 @@ public class RideService {
         this.paymentService = paymentService;
         this.driverService = driverService;
         this.userRatingService = userRatingService;
+        this.userAccountService = userAccountService;
     }
 
     @Transactional(readOnly = true)
@@ -87,6 +91,7 @@ public class RideService {
 
     @Transactional
     public RideResponse create(AuthenticatedUser passageiro, CreateRideRequest req) {
+        userAccountService.requireActive(passageiro.userId());
         RouteInfo route = mapsService.route(
                 req.latOrigem().doubleValue(),
                 req.lngOrigem().doubleValue(),
@@ -149,6 +154,7 @@ public class RideService {
 
     @Transactional
     public RideResponse accept(AuthenticatedUser motorista, UUID rideId) {
+        userAccountService.requireActive(motorista.userId());
         driverService.assertCanAcceptRides(motorista.userId());
 
         Ride ride = rideRepository.findById(rideId)
