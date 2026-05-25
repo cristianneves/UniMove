@@ -10,8 +10,10 @@ import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -117,6 +119,38 @@ class OsrmMapsServiceTest {
         RouteInfo info = service.route(LAT_O, LNG_O, LAT_D, LNG_D);
         assertThat(info.distanciaKm()).isEqualByComparingTo("1.000");
         assertThat(info.tempoMin()).isEqualTo(2);
+    }
+
+    @Test
+    void rotaComParadasEnviaTodosOsWaypointsNaOrdem() {
+        AtomicReference<String> capturedPath = new AtomicReference<>();
+        ExchangeFunction exchange = req -> {
+            capturedPath.set(req.url().getPath());
+            return Mono.just(ClientResponse.create(HttpStatus.OK)
+                    .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                    .body("{\"routes\":[{\"distance\":8000,\"duration\":1200}]}")
+                    .build());
+        };
+        WebClient client = WebClient.builder()
+                .baseUrl("http://osrm.test").exchangeFunction(exchange).build();
+
+        RouteCacheRepository repo = mock(RouteCacheRepository.class);
+        when(repo.findByRouteHash(any())).thenReturn(Optional.empty());
+
+        OsrmMapsService service = new OsrmMapsService(client, repo);
+        RouteInfo info = service.route(List.of(
+                new GeoPoint(LAT_O, LNG_O),
+                new GeoPoint(-20.80500, -49.37000),
+                new GeoPoint(LAT_D, LNG_D)));
+
+        assertThat(info.distanciaKm()).isEqualByComparingTo("8.000");
+        assertThat(info.tempoMin()).isEqualTo(20);
+        // OSRM usa lng,lat separados por ';' — 3 waypoints => 2 ';'
+        String path = capturedPath.get();
+        assertThat(path).startsWith("/route/v1/driving/");
+        assertThat(path.chars().filter(c -> c == ';').count()).isEqualTo(2);
+        assertThat(path).contains(LNG_O + "," + LAT_O);
+        assertThat(path).contains(LNG_D + "," + LAT_D);
     }
 
     // ---- helpers ----------------------------------------------------------

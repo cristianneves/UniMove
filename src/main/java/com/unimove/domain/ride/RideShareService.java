@@ -1,6 +1,7 @@
 package com.unimove.domain.ride;
 
 import com.unimove.domain.ride.dto.SharedRideResponse;
+import com.unimove.domain.ride.dto.StopPoint;
 import com.unimove.domain.user.DriverService;
 import com.unimove.domain.user.UserAccountService;
 import com.unimove.domain.user.dto.DriverPublicInfo;
@@ -10,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -43,6 +45,10 @@ public class RideShareService {
                 ? null
                 : driverService.findPublicInfo(ride.getMotoristaId()).orElse(null);
 
+        List<StopPoint> stops = ride.getStops().stream()
+                .map(s -> new StopPoint(s.getLat(), s.getLng()))
+                .toList();
+
         return new SharedRideResponse(
                 ride.getStatus(),
                 ride.getCidade(),
@@ -51,6 +57,7 @@ public class RideShareService {
                 ride.getLngOrigem(),
                 ride.getLatDestino(),
                 ride.getLngDestino(),
+                stops,
                 passenger.firstName(),
                 driver == null ? null : driver.firstName(),
                 driver == null ? null : driver.vehiclePlate(),

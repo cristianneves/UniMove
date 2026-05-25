@@ -2,9 +2,33 @@ package com.unimove.domain.maps;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class RouteHasherTest {
+
+    @Test
+    void listaDeDoisPontosGeraMesmoHashQueAVersaoLegada() {
+        // Garante que rotas sem paradas continuam reusando o cache existente.
+        String legado = RouteHasher.hash(-20.81972, -49.37944, -20.79500, -49.36000);
+        String lista = RouteHasher.hash(List.of(
+                new GeoPoint(-20.81972, -49.37944),
+                new GeoPoint(-20.79500, -49.36000)));
+        assertThat(lista).isEqualTo(legado);
+    }
+
+    @Test
+    void adicionarUmaParadaMudaOHash() {
+        String semParada = RouteHasher.hash(List.of(
+                new GeoPoint(-20.81972, -49.37944),
+                new GeoPoint(-20.79500, -49.36000)));
+        String comParada = RouteHasher.hash(List.of(
+                new GeoPoint(-20.81972, -49.37944),
+                new GeoPoint(-20.80500, -49.37000),
+                new GeoPoint(-20.79500, -49.36000)));
+        assertThat(comParada).isNotEqualTo(semParada);
+    }
 
     @Test
     void mesmasCoordenadasGeramMesmoHash() {

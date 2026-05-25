@@ -8,6 +8,7 @@ import com.unimove.domain.ride.RideStatus;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 public record RideResponse(
@@ -19,6 +20,7 @@ public record RideResponse(
         BigDecimal lngOrigem,
         BigDecimal latDestino,
         BigDecimal lngDestino,
+        List<StopPoint> stops,
         BigDecimal distanciaKm,
         Integer tempoMin,
         BigDecimal preco,
@@ -53,6 +55,9 @@ public record RideResponse(
                                     BigDecimal driverDistanceKm,
                                     BigDecimal motoristaRatingAvg,
                                     Integer motoristaRatingCount) {
+        List<StopPoint> stops = r.getStops().stream()
+                .map(s -> new StopPoint(s.getLat(), s.getLng()))
+                .toList();
         return new RideResponse(
                 r.getId(),
                 r.getPassageiroId(),
@@ -62,6 +67,7 @@ public record RideResponse(
                 r.getLngOrigem(),
                 r.getLatDestino(),
                 r.getLngDestino(),
+                stops,
                 r.getDistanciaKm(),
                 r.getTempoMin(),
                 r.getPreco(),
