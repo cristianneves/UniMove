@@ -1,6 +1,7 @@
 package com.unimove.domain.ride;
 
 import com.unimove.domain.chat.ChatSseHub;
+import com.unimove.domain.maps.GeoPoint;
 import com.unimove.domain.maps.MapsService;
 import com.unimove.domain.maps.RouteInfo;
 import com.unimove.domain.payment.PaymentService;
@@ -17,6 +18,7 @@ import com.unimove.domain.ride.dto.RatingResponse;
 import com.unimove.domain.ride.dto.RideHistoryItem;
 import com.unimove.domain.ride.dto.RideMuralItem;
 import com.unimove.domain.ride.dto.RideResponse;
+import com.unimove.domain.ride.dto.StopPoint;
 import com.unimove.domain.ride.dto.SubmitRatingRequest;
 import com.unimove.domain.ride.dto.UpdateDriverLocationRequest;
 import org.springframework.data.domain.Page;
@@ -39,6 +41,7 @@ import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -82,12 +85,8 @@ public class RideService {
 
     @Transactional(readOnly = true)
     public EstimateResponse estimate(AuthenticatedUser passageiro, EstimateRequest req) {
-        RouteInfo route = mapsService.route(
-                req.latOrigem().doubleValue(),
-                req.lngOrigem().doubleValue(),
-                req.latDestino().doubleValue(),
-                req.lngDestino().doubleValue()
-        );
+        RouteInfo route = mapsService.route(buildWaypoints(
+                req.latOrigem(), req.lngOrigem(), req.latDestino(), req.lngDestino(), req.stops()));
         RideCategory category = req.category() != null ? req.category() : RideCategory.CARRO;
         BigDecimal preco = pricingPolicy.calculate(
                 route.distanciaKm(), route.tempoMin(), category, passageiro.cidade());
@@ -97,12 +96,8 @@ public class RideService {
     @Transactional
     public RideResponse create(AuthenticatedUser passageiro, CreateRideRequest req) {
         userAccountService.requireActive(passageiro.userId());
-        RouteInfo route = mapsService.route(
-                req.latOrigem().doubleValue(),
-                req.lngOrigem().doubleValue(),
-                req.latDestino().doubleValue(),
-                req.lngDestino().doubleValue()
-        );
+        RouteInfo route = mapsService.route(buildWaypoints(
+                req.latOrigem(), req.lngOrigem(), req.latDestino(), req.lngDestino(), req.stops()));
 
         RideCategory category = req.category() != null ? req.category() : RideCategory.CARRO;
         BigDecimal preco = pricingPolicy.calculate(
@@ -116,16 +111,40 @@ public class RideService {
         ride.setLngOrigem(req.lngOrigem());
         ride.setLatDestino(req.latDestino());
         ride.setLngDestino(req.lngDestino());
+        if (req.stops() != null) {
+            for (StopPoint s : req.stops()) {
+                ride.getStops().add(new RideStop(s.lat(), s.lng()));
+            }
+        }
         ride.setDistanciaKm(route.distanciaKm());
         ride.setTempoMin(route.tempoMin());
         ride.setPreco(preco);
         ride.setStatus(RideStatus.PENDING_PAYMENT);
 
         Ride saved = rideRepository.save(ride);
-        log.info("Ride {} criada por passageiro {} (cidade={}, category={}, preco={})",
-                saved.getId(), passageiro.userId(), saved.getCidade(), category, preco);
+        log.info("Ride {} criada por passageiro {} (cidade={}, category={}, paradas={}, preco={})",
+                saved.getId(), passageiro.userId(), saved.getCidade(), category,
+                saved.getStops().size(), preco);
 
         return RideResponse.from(saved);
+    }
+
+    /**
+     * Monta a sequencia ordenada de waypoints para o OSRM: origem, paradas intermediarias
+     * (na ordem recebida), destino. Distancia/tempo da rota total ja incluem o desvio.
+     */
+    private List<GeoPoint> buildWaypoints(BigDecimal latOrigem, BigDecimal lngOrigem,
+                                          BigDecimal latDestino, BigDecimal lngDestino,
+                                          List<StopPoint> stops) {
+        List<GeoPoint> waypoints = new ArrayList<>();
+        waypoints.add(new GeoPoint(latOrigem.doubleValue(), lngOrigem.doubleValue()));
+        if (stops != null) {
+            for (StopPoint s : stops) {
+                waypoints.add(new GeoPoint(s.lat().doubleValue(), s.lng().doubleValue()));
+            }
+        }
+        waypoints.add(new GeoPoint(latDestino.doubleValue(), lngDestino.doubleValue()));
+        return waypoints;
     }
 
     @Transactional

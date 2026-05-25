@@ -1,10 +1,15 @@
 package com.unimove.domain.ride;
 
+import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
+import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.OrderColumn;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
@@ -14,6 +19,8 @@ import lombok.Setter;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -51,6 +58,15 @@ public class Ride {
 
     @Column(name = "lng_destino", nullable = false, precision = 10, scale = 7)
     private BigDecimal lngDestino;
+
+    /**
+     * Paradas intermediarias ordenadas entre origem e destino. Lazy: nao impacta
+     * as projecoes leves do mural/historico (que nao carregam a entidade).
+     */
+    @ElementCollection(fetch = FetchType.LAZY)
+    @CollectionTable(name = "ride_stops", joinColumns = @JoinColumn(name = "ride_id"))
+    @OrderColumn(name = "seq")
+    private List<RideStop> stops = new ArrayList<>();
 
     @Column(name = "distancia_km", nullable = false, precision = 10, scale = 3)
     private BigDecimal distanciaKm;

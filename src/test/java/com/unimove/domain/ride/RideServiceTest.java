@@ -1,5 +1,7 @@
 package com.unimove.domain.ride;
 
+import com.unimove.domain.chat.ChatSseHub;
+import com.unimove.domain.maps.GeoPoint;
 import com.unimove.domain.maps.MapsService;
 import com.unimove.domain.maps.RouteInfo;
 import com.unimove.domain.payment.PaymentService;
@@ -10,11 +12,13 @@ import com.unimove.domain.ride.dto.EstimateRequest;
 import com.unimove.domain.ride.dto.EstimateResponse;
 import com.unimove.domain.ride.dto.RatingResponse;
 import com.unimove.domain.ride.dto.RideResponse;
+import com.unimove.domain.ride.dto.StopPoint;
 import com.unimove.domain.ride.dto.SubmitRatingRequest;
 import com.unimove.domain.ride.dto.UpdateDriverLocationRequest;
 import com.unimove.domain.user.DriverService;
 import com.unimove.domain.user.RatingStats;
 import com.unimove.domain.user.Role;
+import com.unimove.domain.user.UserAccountService;
 import com.unimove.domain.user.UserRatingService;
 import com.unimove.domain.user.VehicleType;
 import com.unimove.shared.security.AuthenticatedUser;
@@ -29,13 +33,14 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyDouble;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
@@ -64,6 +69,8 @@ class RideServiceTest {
     @Mock PaymentService paymentService;
     @Mock DriverService driverService;
     @Mock UserRatingService userRatingService;
+    @Mock UserAccountService userAccountService;
+    @Mock ChatSseHub chatSseHub;
 
     @InjectMocks RideService rideService;
 
@@ -92,7 +99,7 @@ class RideServiceTest {
     @Test
     @DisplayName("create: preço vem do OSRM + PricingPolicy, não do request")
     void createComputesPriceFromOsrmNotFromRequest() {
-        when(mapsService.route(anyDouble(), anyDouble(), anyDouble(), anyDouble()))
+        when(mapsService.route(anyList()))
                 .thenReturn(new RouteInfo(new BigDecimal("5.000"), 12));
         when(pricingPolicy.calculate(any(BigDecimal.class), eq(12), any(RideCategory.class), anyString()))
                 .thenReturn(new BigDecimal("18.40"));
@@ -115,6 +122,43 @@ class RideServiceTest {
         assertThat(saved.getValue().getTempoMin()).isEqualTo(12);
     }
 
+    @Test
+    @DisplayName("create com paradas: persiste stops e roteia por todos os waypoints")
+    void createWithStopsPersistsStopsAndRoutesThroughThem() {
+        when(mapsService.route(anyList()))
+                .thenReturn(new RouteInfo(new BigDecimal("8.000"), 20));
+        when(pricingPolicy.calculate(any(BigDecimal.class), eq(20), any(RideCategory.class), anyString()))
+                .thenReturn(new BigDecimal("30.00"));
+        when(rideRepository.save(any(Ride.class))).thenAnswer(inv -> {
+            Ride r = inv.getArgument(0);
+            if (r.getId() == null) r.setId(UUID.randomUUID());
+            return r;
+        });
+
+        List<StopPoint> stops = List.of(
+                new StopPoint(new BigDecimal("-20.82500"), new BigDecimal("-49.38500")),
+                new StopPoint(new BigDecimal("-20.82800"), new BigDecimal("-49.38800")));
+        CreateRideRequest req = new CreateRideRequest(
+                new BigDecimal("-20.82000"), new BigDecimal("-49.38000"),
+                new BigDecimal("-20.83000"), new BigDecimal("-49.39000"),
+                RideCategory.CARRO, stops);
+
+        RideResponse resp = rideService.create(pax, req);
+
+        assertThat(resp.stops()).hasSize(2);
+        assertThat(resp.preco()).isEqualByComparingTo("30.00");
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<GeoPoint>> waypoints = ArgumentCaptor.forClass(List.class);
+        verify(mapsService).route(waypoints.capture());
+        // origem + 2 paradas + destino
+        assertThat(waypoints.getValue()).hasSize(4);
+
+        ArgumentCaptor<Ride> saved = ArgumentCaptor.forClass(Ride.class);
+        verify(rideRepository).save(saved.capture());
+        assertThat(saved.getValue().getStops()).hasSize(2);
+    }
+
     // ------------------------------------------------------------------------
     // estimate()
     // ------------------------------------------------------------------------
@@ -122,7 +166,7 @@ class RideServiceTest {
     @Test
     @DisplayName("estimate: usa OSRM + PricingPolicy e NÃO persiste ride")
     void estimateReturnsPriceWithoutPersisting() {
-        when(mapsService.route(anyDouble(), anyDouble(), anyDouble(), anyDouble()))
+        when(mapsService.route(anyList()))
                 .thenReturn(new RouteInfo(new BigDecimal("3.500"), 9));
         when(pricingPolicy.calculate(any(BigDecimal.class), eq(9), any(RideCategory.class), anyString()))
                 .thenReturn(new BigDecimal("14.65"));

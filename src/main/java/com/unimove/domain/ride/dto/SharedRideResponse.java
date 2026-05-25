@@ -6,6 +6,7 @@ import com.unimove.domain.user.VehicleType;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 
 /**
  * Payload exposto publicamente via /share/{token}.
@@ -22,6 +23,7 @@ public record SharedRideResponse(
         BigDecimal lngOrigem,
         BigDecimal latDestino,
         BigDecimal lngDestino,
+        List<StopPoint> stops,
 
         String passengerFirstName,
 
