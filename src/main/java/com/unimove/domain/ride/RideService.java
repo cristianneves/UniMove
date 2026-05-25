@@ -1,5 +1,6 @@
 package com.unimove.domain.ride;
 
+import com.unimove.domain.chat.ChatSseHub;
 import com.unimove.domain.maps.MapsService;
 import com.unimove.domain.maps.RouteInfo;
 import com.unimove.domain.payment.PaymentService;
@@ -55,6 +56,7 @@ public class RideService {
     private final DriverService driverService;
     private final UserRatingService userRatingService;
     private final UserAccountService userAccountService;
+    private final ChatSseHub chatSseHub;
 
     public RideService(RideRepository rideRepository,
                        RideRatingRepository rideRatingRepository,
@@ -64,7 +66,8 @@ public class RideService {
                        PaymentService paymentService,
                        DriverService driverService,
                        UserRatingService userRatingService,
-                       UserAccountService userAccountService) {
+                       UserAccountService userAccountService,
+                       ChatSseHub chatSseHub) {
         this.rideRepository = rideRepository;
         this.rideRatingRepository = rideRatingRepository;
         this.mapsService = mapsService;
@@ -74,6 +77,7 @@ public class RideService {
         this.driverService = driverService;
         this.userRatingService = userRatingService;
         this.userAccountService = userAccountService;
+        this.chatSseHub = chatSseHub;
     }
 
     @Transactional(readOnly = true)
@@ -199,6 +203,7 @@ public class RideService {
         ride.setStatus(RideStatus.COMPLETED);
         ride.setCompletedAt(Instant.now());
         log.info("Ride {} finalizada pelo motorista {}", ride.getId(), motorista.userId());
+        chatSseHub.closeRide(rideId);
         return RideResponse.from(ride);
     }
 
@@ -241,6 +246,7 @@ public class RideService {
 
         log.info("Ride {} cancelada por {} (role={}, fee={})",
                 ride.getId(), user.userId(), user.role(), ride.getCancellationFee());
+        chatSseHub.closeRide(rideId);
         return RideResponse.from(ride);
     }
 
@@ -260,6 +266,32 @@ public class RideService {
         ride.setDriverLocationUpdatedAt(Instant.now());
 
         return RideResponse.from(ride, computeDriverDistanceKm(ride));
+    }
+
+    /**
+     * Valida que o usuario participa da corrida e que o estado permite chat
+     * (DRIVER_EN_ROUTE ou IN_PROGRESS). Usado pelo ChatService.
+     * Retorna a Role do remetente para nao precisar recarregar do banco.
+     */
+    @Transactional(readOnly = true)
+    public Role assertChatAllowed(AuthenticatedUser user, UUID rideId) {
+        Ride ride = rideRepository.findById(rideId)
+                .orElseThrow(RideNotFoundException::new);
+
+        RideStatus s = ride.getStatus();
+        if (s != RideStatus.DRIVER_EN_ROUTE && s != RideStatus.IN_PROGRESS) {
+            throw new com.unimove.domain.chat.ChatNotAllowedException(
+                    "Chat indisponível no estado atual da corrida (" + s + ").");
+        }
+
+        boolean isPassenger = user.role() == Role.PASSAGEIRO
+                && ride.getPassageiroId().equals(user.userId());
+        boolean isAcceptingDriver = user.role() == Role.MOTORISTA
+                && user.userId().equals(ride.getMotoristaId());
+        if (!isPassenger && !isAcceptingDriver) {
+            throw new RideAccessDeniedException();
+        }
+        return user.role();
     }
 
     @Transactional(readOnly = true)
