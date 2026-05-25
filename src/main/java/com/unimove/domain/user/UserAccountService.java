@@ -1,5 +1,6 @@
 package com.unimove.domain.user;
 
+import com.unimove.domain.user.dto.PassengerPublicInfo;
 import com.unimove.domain.user.dto.UserStatusResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -9,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -20,6 +22,12 @@ public class UserAccountService {
 
     public UserAccountService(UserRepository userRepository) {
         this.userRepository = userRepository;
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<PassengerPublicInfo> findPublicInfo(UUID userId) {
+        return userRepository.findById(userId)
+                .map(u -> new PassengerPublicInfo(firstName(u.getName())));
     }
 
     @Transactional(readOnly = true)
@@ -62,5 +70,17 @@ public class UserAccountService {
     public Page<UserStatusResponse> listSuspended(Pageable pageable) {
         return userRepository.findByStatus(UserStatus.SUSPENDED, pageable)
                 .map(UserStatusResponse::from);
+    }
+
+    static String firstName(String fullName) {
+        if (fullName == null) {
+            return null;
+        }
+        String trimmed = fullName.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        int sp = trimmed.indexOf(' ');
+        return sp < 0 ? trimmed : trimmed.substring(0, sp);
     }
 }

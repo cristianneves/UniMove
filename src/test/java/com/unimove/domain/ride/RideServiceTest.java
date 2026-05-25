@@ -36,6 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -93,7 +94,7 @@ class RideServiceTest {
     void createComputesPriceFromOsrmNotFromRequest() {
         when(mapsService.route(anyDouble(), anyDouble(), anyDouble(), anyDouble()))
                 .thenReturn(new RouteInfo(new BigDecimal("5.000"), 12));
-        when(pricingPolicy.calculate(any(BigDecimal.class), eq(12), any(RideCategory.class)))
+        when(pricingPolicy.calculate(any(BigDecimal.class), eq(12), any(RideCategory.class), anyString()))
                 .thenReturn(new BigDecimal("18.40"));
         when(rideRepository.save(any(Ride.class))).thenAnswer(inv -> {
             Ride r = inv.getArgument(0);
@@ -123,10 +124,10 @@ class RideServiceTest {
     void estimateReturnsPriceWithoutPersisting() {
         when(mapsService.route(anyDouble(), anyDouble(), anyDouble(), anyDouble()))
                 .thenReturn(new RouteInfo(new BigDecimal("3.500"), 9));
-        when(pricingPolicy.calculate(any(BigDecimal.class), eq(9), any(RideCategory.class)))
+        when(pricingPolicy.calculate(any(BigDecimal.class), eq(9), any(RideCategory.class), anyString()))
                 .thenReturn(new BigDecimal("14.65"));
 
-        EstimateResponse resp = rideService.estimate(new EstimateRequest(
+        EstimateResponse resp = rideService.estimate(pax, new EstimateRequest(
                 new BigDecimal("-20.82000"),
                 new BigDecimal("-49.38000"),
                 new BigDecimal("-20.83000"),

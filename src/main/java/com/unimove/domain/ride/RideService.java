@@ -77,7 +77,7 @@ public class RideService {
     }
 
     @Transactional(readOnly = true)
-    public EstimateResponse estimate(EstimateRequest req) {
+    public EstimateResponse estimate(AuthenticatedUser passageiro, EstimateRequest req) {
         RouteInfo route = mapsService.route(
                 req.latOrigem().doubleValue(),
                 req.lngOrigem().doubleValue(),
@@ -85,7 +85,8 @@ public class RideService {
                 req.lngDestino().doubleValue()
         );
         RideCategory category = req.category() != null ? req.category() : RideCategory.CARRO;
-        BigDecimal preco = pricingPolicy.calculate(route.distanciaKm(), route.tempoMin(), category);
+        BigDecimal preco = pricingPolicy.calculate(
+                route.distanciaKm(), route.tempoMin(), category, passageiro.cidade());
         return new EstimateResponse(route.distanciaKm(), route.tempoMin(), preco);
     }
 
@@ -100,7 +101,8 @@ public class RideService {
         );
 
         RideCategory category = req.category() != null ? req.category() : RideCategory.CARRO;
-        BigDecimal preco = pricingPolicy.calculate(route.distanciaKm(), route.tempoMin(), category);
+        BigDecimal preco = pricingPolicy.calculate(
+                route.distanciaKm(), route.tempoMin(), category, passageiro.cidade());
 
         Ride ride = new Ride();
         ride.setPassageiroId(passageiro.userId());

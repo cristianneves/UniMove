@@ -12,9 +12,13 @@ import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface RideRepository extends JpaRepository<Ride, UUID> {
+
+    Optional<Ride> findByShareToken(UUID shareToken);
+
 
     @Query("""
             SELECT new com.unimove.domain.ride.dto.RideMuralItem(

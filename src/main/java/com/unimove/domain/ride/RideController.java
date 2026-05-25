@@ -52,8 +52,9 @@ public class RideController {
 
     @PostMapping("/estimate")
     @PreAuthorize("hasRole('PASSAGEIRO')")
-    public EstimateResponse estimate(@Valid @RequestBody EstimateRequest req) {
-        return rideService.estimate(req);
+    public EstimateResponse estimate(@AuthenticationPrincipal AuthenticatedUser user,
+                                     @Valid @RequestBody EstimateRequest req) {
+        return rideService.estimate(user, req);
     }
 
     @PostMapping("/{id}/confirm-payment")

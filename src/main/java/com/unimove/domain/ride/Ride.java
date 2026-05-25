@@ -110,6 +110,9 @@ public class Ride {
     @Column(name = "cancellation_fee", precision = 10, scale = 2)
     private BigDecimal cancellationFee;
 
+    @Column(name = "share_token", unique = true)
+    private UUID shareToken;
+
     @PrePersist
     void onCreate() {
         if (id == null) {
@@ -117,6 +120,9 @@ public class Ride {
         }
         if (createdAt == null) {
             createdAt = Instant.now();
+        }
+        if (shareToken == null) {
+            shareToken = UUID.randomUUID();
         }
     }
 }
