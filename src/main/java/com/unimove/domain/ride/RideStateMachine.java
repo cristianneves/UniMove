@@ -14,13 +14,14 @@ public final class RideStateMachine {
         ALLOWED.put(RideStatus.PENDING_PAYMENT,
                 EnumSet.of(RideStatus.AVAILABLE_IN_MURAL, RideStatus.CANCELLED));
         ALLOWED.put(RideStatus.AVAILABLE_IN_MURAL,
-                EnumSet.of(RideStatus.DRIVER_EN_ROUTE, RideStatus.CANCELLED));
+                EnumSet.of(RideStatus.DRIVER_EN_ROUTE, RideStatus.CANCELLED, RideStatus.EXPIRED));
         ALLOWED.put(RideStatus.DRIVER_EN_ROUTE,
                 EnumSet.of(RideStatus.IN_PROGRESS, RideStatus.CANCELLED));
         ALLOWED.put(RideStatus.IN_PROGRESS,
                 EnumSet.of(RideStatus.COMPLETED));
         ALLOWED.put(RideStatus.COMPLETED, EnumSet.noneOf(RideStatus.class));
         ALLOWED.put(RideStatus.CANCELLED, EnumSet.noneOf(RideStatus.class));
+        ALLOWED.put(RideStatus.EXPIRED, EnumSet.noneOf(RideStatus.class));
     }
 
     private RideStateMachine() {}

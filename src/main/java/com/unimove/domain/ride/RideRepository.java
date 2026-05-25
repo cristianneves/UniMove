@@ -19,6 +19,17 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
 
     Optional<Ride> findByShareToken(UUID shareToken);
 
+    /**
+     * IDs das corridas que ja passaram do TTL no mural. Leve (so o id), apoiada
+     * no indice parcial idx_rides_mural_created_at. O job de expiracao processa
+     * cada id em sua propria transacao para isolar o lock otimista do aceite.
+     */
+    @Query("""
+            SELECT r.id FROM Ride r
+            WHERE r.status = com.unimove.domain.ride.RideStatus.AVAILABLE_IN_MURAL
+              AND r.createdAt < :cutoff
+            """)
+    List<UUID> findExpirableRideIds(@Param("cutoff") Instant cutoff);
 
     @Query("""
             SELECT new com.unimove.domain.ride.dto.RideMuralItem(

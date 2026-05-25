@@ -113,6 +113,9 @@ public class Ride {
     @Column(name = "completed_at")
     private Instant completedAt;
 
+    @Column(name = "expired_at")
+    private Instant expiredAt;
+
     @Column(name = "cancelled_at")
     private Instant cancelledAt;
 

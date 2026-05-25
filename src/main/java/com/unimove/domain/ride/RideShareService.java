@@ -34,7 +34,9 @@ public class RideShareService {
         Ride ride = rideRepository.findByShareToken(token)
                 .orElseThrow(ShareLinkNotFoundException::new);
 
-        if (ride.getStatus() == RideStatus.COMPLETED || ride.getStatus() == RideStatus.CANCELLED) {
+        if (ride.getStatus() == RideStatus.COMPLETED
+                || ride.getStatus() == RideStatus.CANCELLED
+                || ride.getStatus() == RideStatus.EXPIRED) {
             throw new ShareLinkExpiredException();
         }
 
