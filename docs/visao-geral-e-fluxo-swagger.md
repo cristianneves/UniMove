@@ -15,22 +15,26 @@ A meta do MVP **não é competir feature-a-feature com Uber**, é **validar o mo
 ## 2. Arquitetura em uma página
 
 ```
-Flutter app  ─HTTP/JSON──►  Spring Boot (monolito)
-   ▲                            │
-   │ short polling 5s           ├── domain.user     (auth, motoristas, favoritos, admin)
-   │                            ├── domain.ride     (mural, FSM, preço, rating, cancelamento, ganhos)
-   │                            ├── domain.maps     (gateway OSRM + cache local)
-   │                            ├── domain.payment  (Pix/Dinheiro simulado)
-   │                            └── shared          (security, exception handler, utils)
-   │                            │
-   └────────── PostgreSQL ◄─────┘
-                  │
-                  └── route_cache (hits antes de bater no OSRM público)
-                         │
-                         └── OSRM público (router.project-osrm.org) — fallback no miss
+Flutter app  ─HTTP/JSON─────►  Spring Boot (monolito)
+   ▲                              │
+   │ short polling 5s             ├── domain.user     (auth, motoristas, favoritos, admin, suspensão)
+   │                              ├── domain.ride     (mural, FSM, pricing dinâmico, rating, cancelamento,
+   │ SSE p/ chat in-app           │                    ganhos, share público da viagem)
+   │                              ├── domain.chat     (chat in-app via SSE entre passageiro e motorista)
+Browser/zap ─GET /share/{token}─► ├── domain.maps     (gateway OSRM + cache local)
+   (sem auth)                     ├── domain.payment  (Pix/Dinheiro simulado)
+                                  └── shared          (security, exception handler, utils)
+                                  │
+                  PostgreSQL ◄────┘
+                       │
+                       ├── route_cache       (hits antes de bater no OSRM público)
+                       ├── pricing_configs   (tarifa por cidade/categoria, editável pelo ADMIN)
+                       └── chat_messages     (histórico do chat com seq BIGSERIAL)
+                              │
+                              └── OSRM público (router.project-osrm.org) — fallback no miss
 ```
 
-Cada `domain.X` expõe **só interfaces/DTOs**. Nenhum domínio importa entidade JPA de outro — `RideService` fala com motoristas via `DriverService`, com mapas via `MapsService`, com pagamento via `PaymentService`. Isso permite quebrar em microserviços depois sem reescrita.
+Cada `domain.X` expõe **só interfaces/DTOs**. Nenhum domínio importa entidade JPA de outro — `RideService` fala com motoristas via `DriverService`, com mapas via `MapsService`, com pagamento via `PaymentService`. `ChatService` fala com `RideService.assertChatAllowed` e o `SharedRideController` compõe sua resposta via `UserAccountService.findPublicInfo` + `DriverService.findPublicInfo` (DTOs públicos). Isso permite quebrar em microserviços depois sem reescrita.
 
 ---
 
@@ -54,11 +58,13 @@ Toda `User` e toda `Ride` carregam o campo `cidade` (slug normalizado, ex.: `"sa
 
 **Por quê:** o produto nasce para conquistar **uma cidade de cada vez**. Mesmo no MVP, deixar o campo `cidade` desde o início custa zero hoje e evita uma migration dolorosa quando abrirmos a segunda cidade. Uber resolve isso com bounding boxes regionais e roteamento por região — para nós, um string column resolve.
 
-### 3.3 **HTTP short polling**, não WebSockets
+### 3.3 **HTTP short polling para estado da corrida**, não WebSockets
 
-App Flutter bate em `GET /rides/{id}` a cada ~5s (passageiro acompanhando a corrida) e `GET /rides/mural` a cada ~5s (motorista escolhendo corrida). Sem WebSockets, sem SSE, sem push real-time.
+App Flutter bate em `GET /rides/{id}` a cada ~5s (passageiro acompanhando a corrida) e `GET /rides/mural` a cada ~5s (motorista escolhendo corrida). Sem WebSockets para o ciclo da corrida.
 
 **Por quê:** WebSocket exige stack assíncrona, gestão de conexão, reconexão, autenticação por handshake, balanceador sticky, monitoramento dedicado. Para 50 motoristas online + 200 corridas/dia, **polling é trivialmente barato** num único nó Spring Boot. O custo é latência de até 5s para ver mudança de estado — irrelevante na UX de uma corrida que dura 15-30 min.
+
+**Exceção: chat in-app usa SSE (não polling, não WebSocket).** Polling de 5s pra chat dá péssima UX; WebSocket é overkill pra mensagens de texto. SSE entrega latência baixa (servidor empurra a mensagem assim que persiste), JWT funciona pelo header, reconexão é nativa via `Last-Event-ID`. Ver §3.13.
 
 ### 3.4 Rastreamento do motorista por **PUT + Haversine**, não streaming GPS
 
@@ -116,6 +122,42 @@ Passageiro cancelando em `DRIVER_EN_ROUTE` após 120s do `acceptedAt` paga **R$ 
 
 **Por quê:** sem taxa, passageiro chama e cancela sem custo — motorista perde tempo dirigindo à toa. Janela de graça evita punir desistência rápida. R$ 3,00 é simbólico mas suficiente para criar disciplina. Cobrança real é responsabilidade do gateway (que não existe no MVP) — hoje o valor só fica registrado na `Ride.cancellation_fee`.
 
+### 3.13 **Chat in-app via SSE** — não WhatsApp, não WebSocket
+
+Entre `DRIVER_EN_ROUTE` e `IN_PROGRESS`, passageiro e motorista trocam mensagens via:
+- `GET /chat/rides/{id}/stream` — abre SSE, servidor empurra mensagens em tempo real
+- `POST /chat/rides/{id}/messages` — envio (HTTP normal)
+- `GET /chat/rides/{id}/messages` — histórico
+
+Mensagens persistem em `chat_messages` com `seq BIGSERIAL`; cliente reconecta mandando header `Last-Event-ID: <seq>` e recebe replay automático. `ChatSseHub` mantém emitters em memória + heartbeat de 15s. Quando a ride vira `COMPLETED`/`CANCELLED`, `RideService` chama `ChatSseHub.closeRide` — todas as conexões caem com evento `closed`.
+
+**Por quê não WhatsApp:** expõe telefone das duas partes. Em cidade pequena isso vira problema na hora (assédio, chamadas fora do horário, dump na lista de contatos). Chat dentro do app preserva privacidade e fica gravado pra disputa.
+
+**Por quê SSE e não WebSocket:** chat é praticamente unidirecional (server→client; envio é POST). WebSocket exigiria handshake JWT, sub-protocol, reconexão manual, broker. SSE custa ~80 linhas de Java, JWT funciona pelo header, reconexão é nativa. Quando precisar de typing/read-receipt em tempo real, dá pra adicionar via eventos nomeados no mesmo SSE.
+
+### 3.14 **Suspensão de usuário pelo ADMIN** com enforcement assimétrico
+
+`POST /admin/users/{id}/suspend` muda `users.status` para `SUSPENDED` (com `suspended_at`, `suspended_reason`, `suspended_by_admin_id`). Reativação via `POST /admin/users/{id}/reactivate`. Conta ADMIN não pode ser suspensa.
+
+**Enforcement deliberadamente assimétrico:**
+- ✅ Login bloqueado (HTTP 403)
+- ✅ Ações de escrita (`POST /rides`, `POST /rides/{id}/accept`, `POST /drivers/me/online`) bloqueadas via `UserAccountService.requireActive`
+- ❌ GETs (polling de mural, ride detail) **não** validam status
+
+**Por quê:** adicionar `SELECT FROM users WHERE id=?` no filtro JWT dobraria o custo de cada poll de 5s. Suspenso já não consegue criar/aceitar nada nem voltar a logar — o "rastro" de leitura por até 24h (TTL do JWT) é aceitável pro MVP. Quando virar problema, reduz TTL do token ou implementa revogação.
+
+### 3.15 **Compartilhamento público da viagem** com link "expira sozinho"
+
+Toda `Ride` ganha um `share_token` UUID gerado no `@PrePersist`. `GET /share/{token}` (público, sem auth) retorna `SharedRideResponse` com status, coordenadas, primeiro nome e placa do motorista, rating, posição em tempo real e distância haversine. **Não expõe** ID da ride, telefone, email, preço, payload Pix. Em estado final (`COMPLETED`/`CANCELLED`) responde **HTTP 410 GONE** — link "expira" naturalmente.
+
+**Por quê:** segurança vende. Passageiro manda o link no zap pra mãe, mãe acompanha em tempo real sem instalar nada. Custo no backend: 0 (reusa `driver_current_lat/lng` que já existe). Sem TTL adicional porque a janela útil é curta (~30 min) e o token é difícil de adivinhar.
+
+### 3.16 **Tarifa configurável via ADMIN**, não hardcoded
+
+A fórmula `preco = base + per_km * km + per_min * min` continua a mesma, mas os coeficientes vêm da tabela `pricing_configs(cidade, category, base, per_km, per_min)`. `PricingPolicy` mantém cache em memória (`volatile Map`) carregado no startup; ADMIN edita via `PUT /admin/pricing` e o service invalida o cache. Fallback: `(cidade) → (_DEFAULT) → constantes hardcoded de segurança` — app nunca quebra. `_DEFAULT` é protegido contra deleção.
+
+**Por quê:** preço é a alavanca mais importante de teste do produto. Travar a fórmula em código exigiria deploy pra ajustar. Com a tabela, ADMIN testa "MOTO 20% mais barato no piloto de Catanduva" em segundos. Quando rodar com múltiplas instâncias, o `reload()` precisará virar evento pub/sub (Redis ou Postgres `LISTEN`).
+
 ---
 
 ## 4. O que ficou de fora do MVP (e por quê)
@@ -126,10 +168,13 @@ Passageiro cancelando em `DRIVER_EN_ROUTE` após 120s do `acceptedAt` paga **R$ 
 | Mapa síncrono curva-a-curva | OSRM público + cache + Haversine cobrem a UX necessária. |
 | Gateway de pagamento real | Validação de modelo não depende disso. |
 | Disparo por raio + push individual | Mural global resolve com 1% da complexidade. |
-| WebSockets / SSE | Short polling cobre. |
+| WebSockets | Short polling cobre o ciclo da corrida; SSE cobre o chat. |
 | Refresh tokens | Token de 24h é suficiente. |
 | Multi-veículo por motorista | Cidade-piloto não precisa. |
 | Promoções, cupons, programa de fidelidade | Foco em validar o fluxo core. |
+| Typing indicator / read receipts no chat | Texto puro é suficiente pra coordenar embarque. |
+| Edição/delete de mensagem | Mantém histórico inalterado pra disputa. |
+| Anexos/fotos no chat | Exige storage + moderação. |
 
 ---
 
@@ -224,7 +269,7 @@ Passageiro cancelando em `DRIVER_EN_ROUTE` após 120s do `acceptedAt` paga **R$ 
   "paymentMethod": "PIX"
 }
 ```
-✅ Retorna `RideResponse` com `status: "PENDING_PAYMENT"`. **Guarde** o `id` como `RIDE_ID`.
+✅ Retorna `RideResponse` com `status: "PENDING_PAYMENT"` e um `shareToken`. **Guarde** o `id` como `RIDE_ID` e o `shareToken` como `SHARE_TOKEN`.
 
 #### Passo 8 — Passageiro confirma pagamento (Pix simulado)
 **`POST /rides/{RIDE_ID}/confirm-payment`**
@@ -250,13 +295,40 @@ Passageiro cancelando em `DRIVER_EN_ROUTE` após 120s do `acceptedAt` paga **R$ 
 ```
 ✅ Passageiro chamando `GET /rides/{RIDE_ID}` agora vê `driverCurrentLat/Lng` + distância Haversine.
 
+#### Passo 11.1 — (Familiar) acompanha a viagem via link público
+Em uma aba **anônima** (sem token), abrir `GET /share/{SHARE_TOKEN}`.
+✅ Retorna payload reduzido sem PII: status, coordenadas, primeiro nome do motorista, placa, rating, posição atual e distância até o próximo ponto. Endpoint não exige `Authorization`.
+
+#### Passo 11.2 — Passageiro e motorista trocam mensagens (chat SSE)
+Como a corrida está em `DRIVER_EN_ROUTE`, o chat está habilitado.
+
+**Passageiro envia:** `POST /chat/rides/{RIDE_ID}/messages` (com `TOKEN_ANA`)
+```json
+{ "body": "Estou no portão azul." }
+```
+✅ Retorna `ChatMessageResponse` com `seq: 1` (gerado pela BIGSERIAL).
+
+**Motorista lê histórico:** `GET /chat/rides/{RIDE_ID}/messages` (com `TOKEN_BRUNO`)
+✅ Lista com a mensagem da Ana.
+
+**Motorista assina o stream** (Swagger não renderiza SSE bem — use `curl` no terminal):
+```bash
+curl -N -H "Authorization: Bearer $TOKEN_BRUNO" \
+     http://localhost:8080/chat/rides/$RIDE_ID/stream
+```
+✅ Conexão fica aberta. Cada nova mensagem chega no formato `event: message\nid: <seq>\ndata: {...}\n\n`. Servidor envia heartbeat `:ping` a cada 15s.
+
+**Motorista responde:** `POST /chat/rides/{RIDE_ID}/messages` com `{"body": "Chegando em 2 min."}` — o `curl` do passageiro recebe instantaneamente.
+
+**Reconexão:** se o stream cair, reabrir com header `Last-Event-ID: <último seq visto>` → servidor reentrega o que faltou antes de continuar live.
+
 #### Passo 12 — Motorista inicia viagem
 **`POST /rides/{RIDE_ID}/start`**
-✅ Status → `IN_PROGRESS`.
+✅ Status → `IN_PROGRESS`. Chat continua aberto. `/share/{SHARE_TOKEN}` continua acessível.
 
 #### Passo 13 — Motorista finaliza
 **`POST /rides/{RIDE_ID}/complete`**
-✅ Status → `COMPLETED`. `completed_at` preenchido.
+✅ Status → `COMPLETED`. `completed_at` preenchido. Streams SSE do chat recebem evento `closed` e fecham. `GET /share/{SHARE_TOKEN}` agora responde **HTTP 410 GONE**.
 
 #### Passo 14 — Avaliações bidirecionais
 **Passageiro avalia motorista** (`Authorize` com `TOKEN_ANA`):
@@ -278,6 +350,28 @@ Passageiro cancelando em `DRIVER_EN_ROUTE` após 120s do `acceptedAt` paga **R$ 
 - **`GET /rides/history`** (com qualquer dos dois tokens) → lista paginada das próprias corridas.
 - **`GET /drivers/me/earnings?from=2026-05-01&to=2026-05-31`** (Bruno) → agregado de ganhos com breakdown diário.
 
+#### Passo 16 — (ADMIN) operações de painel
+**`Authorize`** com `TOKEN_ADMIN`.
+
+- **Configurar tarifa específica para SJRP:** `PUT /admin/pricing`
+  ```json
+  { "cidade": "sao-jose-do-rio-preto", "category": "MOTO",
+    "base": 4.00, "perKm": 1.80, "perMin": 0.15 }
+  ```
+  ✅ Próxima `POST /rides/estimate` em SJRP usará esses valores; outras cidades caem no `_DEFAULT`.
+
+- **Listar todas as configs:** `GET /admin/pricing` → 2 do `_DEFAULT` + a nova de SJRP.
+
+- **Reverter:** `DELETE /admin/pricing?cidade=sao-jose-do-rio-preto&category=MOTO` → SJRP volta a usar `_DEFAULT`.
+
+- **Suspender um passageiro problemático:** `POST /admin/users/{ID_DA_ANA}/suspend`
+  ```json
+  { "reason": "Reclamações reiteradas de motoristas; cancelou 8 corridas em 1h." }
+  ```
+  ✅ Próximo `POST /auth/login` da Ana → 403 `UserSuspendedException`. Token antigo da Ana ainda consegue GET por até 24h, mas não consegue criar/aceitar nada.
+
+- **Reativar:** `POST /admin/users/{ID_DA_ANA}/reactivate`.
+
 ### 5.3 Cenários alternativos para testar
 
 | Cenário | Como reproduzir | Resultado esperado |
@@ -288,9 +382,18 @@ Passageiro cancelando em `DRIVER_EN_ROUTE` após 120s do `acceptedAt` paga **R$ 
 | Motorista offline tenta aceitar | `POST /drivers/me/offline`, depois `accept` | 403/409 conforme regra |
 | Motorista CARRO tenta aceitar corrida MOTO | Cadastrar motorista CARRO, criar corrida MOTO | Corrida nem aparece no mural; accept direto → 409/403 |
 | Cidade diferente | Cadastrar motorista em outra cidade | Mural vazio para corridas de SJRP |
+| Chat fora da janela | `POST /chat/rides/{id}/messages` em ride `PENDING_PAYMENT` ou `COMPLETED` | 403 `ChatNotAllowedException` |
+| Chat de não-participante | Terceiro usuário tenta `GET /chat/rides/{id}/messages` | 403 `RideAccessDeniedException` |
+| Body de chat acima de 1000 chars | `POST .../messages` com `body` longo | 400 (Bean Validation) |
+| Share de ride encerrada | `GET /share/{token}` após `complete` | 410 GONE |
+| Share token inexistente | `GET /share/{uuid-aleatório}` | 404 |
+| Suspenso tenta logar | `POST /auth/login` com user em `status=SUSPENDED` | 403 `UserSuspendedException` |
+| Suspender ADMIN | `POST /admin/users/{id-admin}/suspend` | 403 `CannotSuspendAdminException` |
+| Deletar pricing `_DEFAULT` | `DELETE /admin/pricing?cidade=_DEFAULT&category=CARRO` | 403 `CannotDeleteDefaultPricingException` |
+| Pricing por cidade override | PUT em SJRP, depois `/rides/estimate` em SJRP vs outra cidade | Preços diferem |
 
 ---
 
 ## 6. Resumo de uma linha
 
-**UniMove troca complexidade técnica por foco em mercado:** mural global ao invés de match geoespacial, polling ao invés de WebSockets, pagamento simulado ao invés de PSP real, aprovação manual ao invés de OCR — tudo isso para subir o produto numa cidade-piloto com infra mínima e iterar a partir do uso real, sem queimar capital tentando ser Uber no dia 1.
+**UniMove troca complexidade técnica por foco em mercado:** mural global ao invés de match geoespacial, polling ao invés de WebSockets, SSE ao invés de WebSocket pro chat, pagamento simulado ao invés de PSP real, aprovação manual ao invés de OCR, suspensão assimétrica ao invés de revogação por request, tarifa em tabela ao invés de surge dinâmico — tudo isso para subir o produto numa cidade-piloto com infra mínima e iterar a partir do uso real, sem queimar capital tentando ser Uber no dia 1. As features que **sobraram** (share público, chat in-app sem expor telefone, ADMIN com controle real de preço e contas) são exatamente as que cidade pequena percebe como diferencial.

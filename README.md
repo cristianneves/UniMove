@@ -62,11 +62,14 @@ Monolito modular por dominio (detalhes em `CLAUDE.md`):
 
 ```
 com.unimove
-├── domain.user       Auth, JWT, driver online/offline, admin, favoritos, ratings  [implementado]
+├── domain.user       Auth, JWT, driver online/offline, admin, favoritos,         [implementado]
+│                     ratings, suspensao de usuario
 ├── domain.maps       Gateway OSRM + cache de rotas (MapsService)                  [implementado]
-├── domain.ride       Mural, maquina de estados, tarifa, polling, estimate,        [implementado]
-│                     rating bi, taxa de cancelamento, categorias MOTO/CARRO,
-│                     earnings do motorista
+├── domain.ride       Mural, maquina de estados, tarifa dinamica (pricing_configs), [implementado]
+│                     polling, estimate, rating bi, taxa de cancelamento,
+│                     categorias MOTO/CARRO, earnings do motorista,
+│                     compartilhamento publico da viagem (/share/{token})
+├── domain.chat       Chat in-app via SSE entre passageiro e motorista             [implementado]
 ├── domain.payment    Simulacao Pix + Dinheiro (BR Code ficticio)                  [implementado]
 └── shared            Config, security, exception handler, utils                   [implementado]
 ```
@@ -115,18 +118,23 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 | Bloco                       | Status        | Observacoes |
 |-----------------------------|---------------|-------------|
 | Scaffold (pom, profiles)    | concluido     | Spring Boot 3.3.5 + Java 21 |
-| Schema (`V1`-`V6`)          | concluido     | users, drivers, rides (com `@Version`), route_cache, ride_ratings, saved_places, cancellation_fee, category |
+| Schema (`V1`-`V10`)         | concluido     | users (com `status`), drivers, rides (com `@Version` e `share_token`), route_cache, ride_ratings, saved_places, cancellation_fee, category, pricing_configs, chat_messages |
 | `shared` (security, JWT, exception handler) | concluido | `GlobalExceptionHandler` cobre validacao, lock otimista, `BusinessException` |
-| `domain.user`               | concluido     | `/auth/*`, online/offline, admin approve, `/saved-places`, denormalizacao de rating em `users` |
+| `domain.user`               | concluido     | `/auth/*`, online/offline, admin approve, `/saved-places`, denormalizacao de rating, **suspensao/reativacao via `/admin/users/*`** |
 | `domain.maps`               | concluido     | `MapsService` + `OsrmMapsService` (cache-aside via `route_cache`) |
 | `domain.payment`            | concluido     | `SimulatedPaymentService` — BR Code ficticio (sem PSP real) |
-| `domain.ride`               | concluido     | Criacao, estimate, mural por cidade+categoria, aceite (lock otimista), state machine, cancelamento com taxa, polling, rating bi, earnings do motorista |
-| Estimativa de preço         | concluido     | `POST /rides/estimate` reusa OSRM + cache + `PricingPolicy` sem persistir |
+| `domain.ride`               | concluido     | Criacao, estimate, mural por cidade+categoria, aceite (lock otimista), state machine, cancelamento com taxa, polling, rating bi, earnings, **share publico em `/share/{token}`** |
+| `domain.chat`               | concluido     | **Chat in-app via SSE em `/chat/rides/{id}/*` — habilitado durante `DRIVER_EN_ROUTE`/`IN_PROGRESS`** |
+| Estimativa de preço         | concluido     | `POST /rides/estimate` reusa OSRM + cache + `PricingPolicy` (cidade-aware) sem persistir |
 | Rating bidirecional         | concluido     | `POST /rides/{id}/rating`, denormalizacao `rating_avg`/`rating_count` em `users` |
 | Endereços favoritos         | concluido     | `POST/GET/DELETE /saved-places` (PASSAGEIRO) |
 | Earnings do motorista       | concluido     | `GET /drivers/me/earnings?from=&to=` com breakdown por dia |
 | Taxa de cancelamento        | concluido     | `CancellationPolicy` — R$ 3,00 após 120s de `DRIVER_EN_ROUTE` (passageiro) |
-| Categorias MOTO/CARRO       | concluido     | Matching server-side no mural + accept, multiplicador de preço por categoria |
+| Categorias MOTO/CARRO       | concluido     | Matching server-side no mural + accept, coeficientes por categoria |
+| Suspensao de usuario        | concluido     | `POST /admin/users/{id}/suspend|reactivate`; enforcement assimetrico (login + acoes de escrita) |
+| Share publico da viagem     | concluido     | `share_token` em toda ride; `GET /share/{token}` publico, 410 ao terminar |
+| Tarifa configuravel         | concluido     | `pricing_configs(cidade, category, base, per_km, per_min)` + cache em memoria; ADMIN edita via `PUT /admin/pricing` |
+| Chat in-app via SSE         | concluido     | `chat_messages.seq BIGSERIAL` + `Last-Event-ID` pra reconexao; heartbeat 15s |
 | OpenAPI / Swagger UI        | concluido     | `springdoc-openapi` em `/swagger-ui.html` |
 | Coleção HTTP / smoke test   | concluido     | `docs/api.http` + `docs/smoke-test.md` |
 
