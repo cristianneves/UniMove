@@ -566,6 +566,55 @@ class RideServiceTest {
     }
 
     // ------------------------------------------------------------------------
+    // expireRide() — expiracao no mural
+    // ------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("expireRide: AVAILABLE_IN_MURAL → EXPIRED + expiredAt")
+    void expireRideTransitionsAvailableToExpired() {
+        Ride ride = rideAvailable(pax.userId(), CIDADE);
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        boolean expired = rideService.expireRide(ride.getId());
+
+        assertThat(expired).isTrue();
+        assertThat(ride.getStatus()).isEqualTo(RideStatus.EXPIRED);
+        assertThat(ride.getExpiredAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("expireRide: corrida ja aceita não é expirada (retorna false)")
+    void expireRideSkipsRideAlreadyAccepted() {
+        Ride ride = rideEnRoute(pax.userId(), mot.userId());
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        boolean expired = rideService.expireRide(ride.getId());
+
+        assertThat(expired).isFalse();
+        assertThat(ride.getStatus()).isEqualTo(RideStatus.DRIVER_EN_ROUTE);
+    }
+
+    @Test
+    @DisplayName("expireRide: corrida inexistente retorna false sem quebrar")
+    void expireRideReturnsFalseWhenRideGone() {
+        UUID id = UUID.randomUUID();
+        when(rideRepository.findById(id)).thenReturn(Optional.empty());
+
+        assertThat(rideService.expireRide(id)).isFalse();
+    }
+
+    @Test
+    @DisplayName("findExpirableRideIds delega para o repository com o cutoff")
+    void findExpirableRideIdsDelegatesToRepository() {
+        Instant cutoff = Instant.now();
+        UUID id = UUID.randomUUID();
+        when(rideRepository.findExpirableRideIds(cutoff)).thenReturn(java.util.List.of(id));
+
+        assertThat(rideService.findExpirableRideIds(cutoff)).containsExactly(id);
+        verify(rideRepository).findExpirableRideIds(cutoff);
+    }
+
+    // ------------------------------------------------------------------------
     // Builders auxiliares
     // ------------------------------------------------------------------------
 

@@ -399,6 +399,36 @@ public class RideService {
         };
     }
 
+    /**
+     * IDs de corridas elegiveis a expiracao (em AVAILABLE_IN_MURAL ha mais que o TTL).
+     * Chamado pelo {@code RideExpirationScheduler}.
+     */
+    @Transactional(readOnly = true)
+    public List<UUID> findExpirableRideIds(Instant cutoff) {
+        return rideRepository.findExpirableRideIds(cutoff);
+    }
+
+    /**
+     * Expira UMA corrida (AVAILABLE_IN_MURAL → EXPIRED) em sua propria transacao.
+     * Re-checa o estado pois a corrida pode ter sido aceita/cancelada entre a
+     * varredura e este load. Se um motorista aceitar concorrentemente, o lock
+     * otimista (@Version) faz esta transacao falhar no commit — o scheduler trata.
+     *
+     * @return true se expirou; false se ja nao estava no mural (corrida do meio).
+     */
+    @Transactional
+    public boolean expireRide(UUID rideId) {
+        Ride ride = rideRepository.findById(rideId).orElse(null);
+        if (ride == null || ride.getStatus() != RideStatus.AVAILABLE_IN_MURAL) {
+            return false;
+        }
+        RideStateMachine.assertCanTransition(ride.getStatus(), RideStatus.EXPIRED);
+        ride.setStatus(RideStatus.EXPIRED);
+        ride.setExpiredAt(Instant.now());
+        log.info("Ride {} expirada no mural (nenhum motorista aceitou dentro do TTL)", rideId);
+        return true;
+    }
+
     private Ride loadAsAcceptingDriver(AuthenticatedUser motorista, UUID rideId) {
         Ride ride = rideRepository.findById(rideId)
                 .orElseThrow(RideNotFoundException::new);

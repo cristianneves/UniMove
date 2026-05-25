@@ -36,6 +36,11 @@ app:
     bandeira: 5.50
     preco-por-km: 2.10
     preco-por-min: 0.20
+    expiration:
+      # Corrida parada no mural sem motorista por mais que ttl-minutes vira EXPIRED.
+      enabled: ${RIDE_EXPIRATION_ENABLED:true}
+      ttl-minutes: ${RIDE_EXPIRATION_TTL_MINUTES:15}
+      scan-interval-ms: ${RIDE_EXPIRATION_SCAN_INTERVAL_MS:60000}
 
 logging:
   level:
