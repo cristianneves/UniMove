@@ -12,6 +12,7 @@ import com.unimove.domain.ride.dto.EstimateRequest;
 import com.unimove.domain.ride.dto.EstimateResponse;
 import com.unimove.domain.ride.dto.RatingResponse;
 import com.unimove.domain.ride.dto.RideResponse;
+import com.unimove.domain.ride.dto.RideStatusEvent;
 import com.unimove.domain.ride.dto.StopPoint;
 import com.unimove.domain.ride.dto.SubmitRatingRequest;
 import com.unimove.domain.ride.dto.UpdateDriverLocationRequest;
@@ -30,6 +31,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -71,6 +73,7 @@ class RideServiceTest {
     @Mock UserRatingService userRatingService;
     @Mock UserAccountService userAccountService;
     @Mock ChatSseHub chatSseHub;
+    @Mock RideStatusSseHub statusSseHub;
 
     @InjectMocks RideService rideService;
 
@@ -612,6 +615,106 @@ class RideServiceTest {
 
         assertThat(rideService.findExpirableRideIds(cutoff)).containsExactly(id);
         verify(rideRepository).findExpirableRideIds(cutoff);
+    }
+
+    // ------------------------------------------------------------------------
+    // SSE de status (regra 18)
+    // ------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("accept: emite evento de status DRIVER_EN_ROUTE sem fechar o stream")
+    void acceptBroadcastsStatusEvent() {
+        Ride ride = rideAvailable(pax.userId(), CIDADE);
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        rideService.accept(mot, ride.getId());
+
+        ArgumentCaptor<RideStatusEvent> ev = ArgumentCaptor.forClass(RideStatusEvent.class);
+        verify(statusSseHub).broadcast(eq(ride.getId()), ev.capture());
+        assertThat(ev.getValue().status()).isEqualTo(RideStatus.DRIVER_EN_ROUTE);
+        assertThat(ev.getValue().terminal()).isFalse();
+        verify(statusSseHub, never()).closeRide(any());
+    }
+
+    @Test
+    @DisplayName("complete: emite status COMPLETED (terminal) e fecha o stream de status")
+    void completeBroadcastsTerminalAndCloses() {
+        Ride ride = rideInProgress(pax.userId(), mot.userId());
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        rideService.complete(mot, ride.getId());
+
+        ArgumentCaptor<RideStatusEvent> ev = ArgumentCaptor.forClass(RideStatusEvent.class);
+        verify(statusSseHub).broadcast(eq(ride.getId()), ev.capture());
+        assertThat(ev.getValue().status()).isEqualTo(RideStatus.COMPLETED);
+        assertThat(ev.getValue().terminal()).isTrue();
+        verify(statusSseHub).closeRide(ride.getId());
+    }
+
+    @Test
+    @DisplayName("cancel: emite status CANCELLED (terminal) e fecha o stream de status")
+    void cancelBroadcastsTerminalAndCloses() {
+        Ride ride = rideEnRoute(pax.userId(), mot.userId());
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        rideService.cancel(pax, ride.getId(), null);
+
+        ArgumentCaptor<RideStatusEvent> ev = ArgumentCaptor.forClass(RideStatusEvent.class);
+        verify(statusSseHub).broadcast(eq(ride.getId()), ev.capture());
+        assertThat(ev.getValue().status()).isEqualTo(RideStatus.CANCELLED);
+        assertThat(ev.getValue().cancelledBy()).isEqualTo(CancelledBy.PASSAGEIRO);
+        verify(statusSseHub).closeRide(ride.getId());
+    }
+
+    @Test
+    @DisplayName("expireRide: emite status EXPIRED (terminal) e fecha o stream de status")
+    void expireRideBroadcastsTerminal() {
+        Ride ride = rideAvailable(pax.userId(), CIDADE);
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        rideService.expireRide(ride.getId());
+
+        ArgumentCaptor<RideStatusEvent> ev = ArgumentCaptor.forClass(RideStatusEvent.class);
+        verify(statusSseHub).broadcast(eq(ride.getId()), ev.capture());
+        assertThat(ev.getValue().status()).isEqualTo(RideStatus.EXPIRED);
+        verify(statusSseHub).closeRide(ride.getId());
+    }
+
+    @Test
+    @DisplayName("subscribeStatus: participante registra emitter (sem fechar em estado ativo)")
+    void subscribeStatusRegistersForParticipant() {
+        Ride ride = rideEnRoute(pax.userId(), mot.userId());
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+        when(statusSseHub.register(ride.getId())).thenReturn(new SseEmitter());
+
+        SseEmitter emitter = rideService.subscribeStatus(pax, ride.getId());
+
+        assertThat(emitter).isNotNull();
+        verify(statusSseHub).register(ride.getId());
+        verify(statusSseHub, never()).closeRide(any());
+    }
+
+    @Test
+    @DisplayName("subscribeStatus: corrida em estado final manda snapshot e fecha")
+    void subscribeStatusClosesWhenTerminal() {
+        Ride ride = rideCompleted(pax.userId(), mot.userId());
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+        when(statusSseHub.register(ride.getId())).thenReturn(new SseEmitter());
+
+        rideService.subscribeStatus(pax, ride.getId());
+
+        verify(statusSseHub).closeRide(ride.getId());
+    }
+
+    @Test
+    @DisplayName("subscribeStatus: não-participante → RideAccessDeniedException, sem registrar")
+    void subscribeStatusDeniedForIntruder() {
+        Ride ride = rideEnRoute(pax.userId(), mot.userId());
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        assertThatThrownBy(() -> rideService.subscribeStatus(outroPax, ride.getId()))
+                .isInstanceOf(RideAccessDeniedException.class);
+        verify(statusSseHub, never()).register(any());
     }
 
     // ------------------------------------------------------------------------
