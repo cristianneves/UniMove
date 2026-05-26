@@ -18,6 +18,7 @@ import com.unimove.domain.ride.dto.RatingResponse;
 import com.unimove.domain.ride.dto.RideHistoryItem;
 import com.unimove.domain.ride.dto.RideMuralItem;
 import com.unimove.domain.ride.dto.RideResponse;
+import com.unimove.domain.ride.dto.RideStatusEvent;
 import com.unimove.domain.ride.dto.StopPoint;
 import com.unimove.domain.ride.dto.SubmitRatingRequest;
 import com.unimove.domain.ride.dto.UpdateDriverLocationRequest;
@@ -35,7 +36,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
@@ -60,6 +65,7 @@ public class RideService {
     private final UserRatingService userRatingService;
     private final UserAccountService userAccountService;
     private final ChatSseHub chatSseHub;
+    private final RideStatusSseHub statusSseHub;
 
     public RideService(RideRepository rideRepository,
                        RideRatingRepository rideRatingRepository,
@@ -70,7 +76,8 @@ public class RideService {
                        DriverService driverService,
                        UserRatingService userRatingService,
                        UserAccountService userAccountService,
-                       ChatSseHub chatSseHub) {
+                       ChatSseHub chatSseHub,
+                       RideStatusSseHub statusSseHub) {
         this.rideRepository = rideRepository;
         this.rideRatingRepository = rideRatingRepository;
         this.mapsService = mapsService;
@@ -81,6 +88,7 @@ public class RideService {
         this.userRatingService = userRatingService;
         this.userAccountService = userAccountService;
         this.chatSseHub = chatSseHub;
+        this.statusSseHub = statusSseHub;
     }
 
     @Transactional(readOnly = true)
@@ -167,6 +175,7 @@ public class RideService {
         ride.setStatus(RideStatus.AVAILABLE_IN_MURAL);
 
         log.info("Ride {} confirmada ({}) → AVAILABLE_IN_MURAL", ride.getId(), req.method());
+        publishStatus(ride);
         return RideResponse.from(ride);
     }
 
@@ -202,6 +211,7 @@ public class RideService {
         ride.setAcceptedAt(Instant.now());
 
         log.info("Ride {} aceita pelo motorista {}", ride.getId(), motorista.userId());
+        publishStatus(ride);
         return RideResponse.from(ride);
     }
 
@@ -212,6 +222,7 @@ public class RideService {
         ride.setStatus(RideStatus.IN_PROGRESS);
         ride.setStartedAt(Instant.now());
         log.info("Ride {} iniciada pelo motorista {}", ride.getId(), motorista.userId());
+        publishStatus(ride);
         return RideResponse.from(ride);
     }
 
@@ -223,6 +234,7 @@ public class RideService {
         ride.setCompletedAt(Instant.now());
         log.info("Ride {} finalizada pelo motorista {}", ride.getId(), motorista.userId());
         chatSseHub.closeRide(rideId);
+        publishStatus(ride);
         return RideResponse.from(ride);
     }
 
@@ -266,6 +278,7 @@ public class RideService {
         log.info("Ride {} cancelada por {} (role={}, fee={})",
                 ride.getId(), user.userId(), user.role(), ride.getCancellationFee());
         chatSseHub.closeRide(rideId);
+        publishStatus(ride);
         return RideResponse.from(ride);
     }
 
@@ -318,14 +331,7 @@ public class RideService {
         Ride ride = rideRepository.findById(rideId)
                 .orElseThrow(RideNotFoundException::new);
 
-        boolean isPassenger = user.role() == Role.PASSAGEIRO
-                && ride.getPassageiroId().equals(user.userId());
-        boolean isAcceptingDriver = user.role() == Role.MOTORISTA
-                && user.userId().equals(ride.getMotoristaId());
-
-        if (!isPassenger && !isAcceptingDriver) {
-            throw new RideAccessDeniedException();
-        }
+        assertParticipant(user, ride);
 
         BigDecimal motoristaAvg = null;
         Integer motoristaCount = null;
@@ -336,6 +342,32 @@ public class RideService {
         }
 
         return RideResponse.from(ride, computeDriverDistanceKm(ride), motoristaAvg, motoristaCount);
+    }
+
+    /**
+     * Abre o SSE de status (regra 18). Emite imediatamente um snapshot do estado
+     * atual — assim, mesmo reconectando depois de perder transicoes, o cliente
+     * recebe a verdade corrente sem precisar de replay. Se a corrida ja esta em
+     * estado final, manda o snapshot e fecha o stream em seguida.
+     */
+    @Transactional(readOnly = true)
+    public SseEmitter subscribeStatus(AuthenticatedUser user, UUID rideId) {
+        Ride ride = rideRepository.findById(rideId)
+                .orElseThrow(RideNotFoundException::new);
+        assertParticipant(user, ride);
+
+        SseEmitter emitter = statusSseHub.register(rideId);
+        RideStatusEvent snapshot = RideStatusEvent.from(ride);
+        try {
+            emitter.send(RideStatusSseHub.buildEvent(snapshot));
+        } catch (IOException e) {
+            emitter.complete();
+            return emitter;
+        }
+        if (snapshot.terminal()) {
+            statusSseHub.closeRide(rideId);
+        }
+        return emitter;
     }
 
     @Transactional(readOnly = true)
@@ -426,7 +458,47 @@ public class RideService {
         ride.setStatus(RideStatus.EXPIRED);
         ride.setExpiredAt(Instant.now());
         log.info("Ride {} expirada no mural (nenhum motorista aceitou dentro do TTL)", rideId);
+        publishStatus(ride);
         return true;
+    }
+
+    /** Passageiro dono ou motorista aceitante; qualquer outro → 403. */
+    private void assertParticipant(AuthenticatedUser user, Ride ride) {
+        boolean isPassenger = user.role() == Role.PASSAGEIRO
+                && ride.getPassageiroId().equals(user.userId());
+        boolean isAcceptingDriver = user.role() == Role.MOTORISTA
+                && user.userId().equals(ride.getMotoristaId());
+        if (!isPassenger && !isAcceptingDriver) {
+            throw new RideAccessDeniedException();
+        }
+    }
+
+    /**
+     * Publica a transicao de estado no SSE de status (regra 18). O broadcast
+     * roda em afterCommit: so emitimos o evento depois que a transacao confirma,
+     * evitando notificar uma transicao que pode dar rollback — em especial o
+     * expireRide, cujo commit pode falhar por lock otimista se um motorista
+     * aceitar concorrentemente. Eventos terminais fecham o stream apos o envio.
+     */
+    private void publishStatus(Ride ride) {
+        RideStatusEvent event = RideStatusEvent.from(ride);
+        UUID rideId = ride.getId();
+        Runnable emit = () -> {
+            statusSseHub.broadcast(rideId, event);
+            if (event.terminal()) {
+                statusSseHub.closeRide(rideId);
+            }
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    emit.run();
+                }
+            });
+        } else {
+            emit.run();
+        }
     }
 
     private Ride loadAsAcceptingDriver(AuthenticatedUser motorista, UUID rideId) {
