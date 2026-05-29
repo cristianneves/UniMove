@@ -1,6 +1,6 @@
 # UniMove — Estado atual do projeto
 
-> Snapshot em **2026-05-24**. Branch `main`, último commit `e890788` + working tree com **suspensão de usuário**, **compartilhamento público de viagem**, **tarifa dinâmica configurável** e **chat in-app via SSE** aplicados.
+> Snapshot em **2026-05-29**. Branch `feature/geocoding-enderecos` + histórico com **suspensão de usuário**, **compartilhamento público de viagem**, **tarifa dinâmica configurável**, **chat in-app via SSE**, **status da corrida via SSE**, **múltiplas paradas**, **geometria da rota pro mapa** e **busca de endereço (geocoding via Photon)** aplicados.
 > Documento de visão geral: o que existe, como o fluxo funciona, se está pronto para MVP e para integração com o frontend.
 
 ---
@@ -37,7 +37,7 @@ O backend monolítico do UniMove já cobre o **fluxo ponta-a-ponta de uma corrid
 
 ### 2.2 `domain.ride` — núcleo do produto
 
-- **Entidade `Ride`** com `@Version` para lock otimista, todos os timestamps separados (`accepted_at`, `started_at`, `completed_at`, `cancelled_at`), colunas de rastreamento do motorista (`driver_current_lat/lng/_updated_at`), **`category` (MOTO/CARRO)**, **`cancellation_fee`** opcional e **`share_token` UUID UNIQUE** (gerado no `@PrePersist`).
+- **Entidade `Ride`** com `@Version` para lock otimista, todos os timestamps separados (`accepted_at`, `started_at`, `completed_at`, `cancelled_at`), colunas de rastreamento do motorista (`driver_current_lat/lng/_updated_at`), **`category` (MOTO/CARRO)**, **`cancellation_fee`** opcional, **`share_token` UUID UNIQUE** (gerado no `@PrePersist`), **`route_geometry` TEXT** (polyline gravada no `create`) e **paradas intermediárias** em `ride_stops` (`@ElementCollection` LAZY + `@OrderColumn(seq)`, máx. 5).
 - **Entidade `RideRating`** (id, ride_id, rater_id, ratee_id, score 1-5, comment, created_at) com `UNIQUE(ride_id, rater_id)` — uma avaliação por direção por corrida.
 - **Entidade `PricingConfig`** (id, cidade, category, base, per_km, per_min, updated_at, updated_by_admin_id) com `UNIQUE(cidade, category)` — backing store da `PricingPolicy`.
 - **Máquina de estados** `RideStateMachine` reforçando o diagrama da `CLAUDE.md`. Transição inválida → `IllegalRideTransitionException` → HTTP 409.
@@ -50,6 +50,8 @@ O backend monolítico do UniMove já cobre o **fluxo ponta-a-ponta de uma corrid
   - `POST /rides/{id}/cancel` (PASSAGEIRO ou MOTORISTA, com regras de estado; resposta inclui `cancellationFee` se aplicável)
   - `PUT /rides/{id}/driver-location` (MOTORISTA aceitante)
   - `GET /rides/{id}` (dono ou motorista aceitante) — usado pelo polling do app
+  - `GET /rides/{id}/route` (dono ou motorista aceitante) — geometria estática da rota (`RideRouteResponse` com a polyline); buscada **uma vez** pelo app, fora do polling leve (regra 3)
+  - `GET /rides/{id}/status-stream` (dono ou motorista aceitante) — SSE de status (snapshot na conexão + transições `afterCommit`, sem replay)
   - `GET /rides/history` (PASSAGEIRO ou MOTORISTA — vê apenas as próprias)
   - `POST /rides/{id}/rating` (PASSAGEIRO ou MOTORISTA, só após `COMPLETED`)
 - **`SharedRideController`** (público, sem auth) — `GET /share/{token}` retorna `SharedRideResponse` com payload reduzido (sem PII). Em estado final responde **HTTP 410 GONE**.
@@ -60,12 +62,21 @@ O backend monolítico do UniMove já cobre o **fluxo ponta-a-ponta de uma corrid
 - **`RideService.complete/cancel`** chamam `ChatSseHub.closeRide(rideId)` para encerrar conexões SSE do chat.
 - **Exceções dedicadas:** `RideNotFoundException`, `RideAccessDeniedException`, `IllegalRideTransitionException`, `DriverCityMismatchException`, `MissingCancelReasonException`, `LocationUpdateNotAllowedException`, `CategoryMismatchException`, `RatingNotAllowedException`, `RatingAlreadySubmittedException`, `InvalidEarningsRangeException`, **`ShareLinkNotFoundException`** (404), **`ShareLinkExpiredException`** (410), **`PricingConfigNotFoundException`** (404), **`CannotDeleteDefaultPricingException`** (403).
 
-### 2.3 `domain.maps` — OSRM + cache
+### 2.3 `domain.maps` — OSRM (rotas + geometria) + Photon (geocoding)
 
+**Gateway de rotas (OSRM):**
 - `MapsService` (interface) + `OsrmMapsService` (impl) consultando `route_cache` primeiro, com fallback no OSRM público via `WebClient`.
-- `RouteHasher` arredonda coordenadas a 4 casas decimais (~11 m) para gerar chave determinística.
-- `RouteCache` é uma tabela autônoma, sem TTL — ADMIN faz `TRUNCATE` se precisar invalidar.
-- `MapsUnavailableException` traduzida para HTTP 503 no `GlobalExceptionHandler`.
+- `RouteHasher` arredonda coordenadas a 4 casas decimais (~11 m) para gerar chave determinística. Para múltiplas paradas o hash cobre a **sequência completa de waypoints**; com 2 pontos o hash é idêntico ao formato antigo (preserva o cache existente).
+- `route(List<GeoPoint>)` envia `[origem, ...paradas, destino]` num único request. OSRM chamado com `overview=full&geometries=polyline` (precisão 5).
+- `RouteInfo` agora carrega `distanciaKm`, `tempoMin` **e** `geometry` (polyline). Hit no cache só conta como completo se `geometry != null`; entradas antigas (`geometry IS NULL`) disparam uma rebusca única que faz **backfill** da coluna.
+- `RouteCache` é uma tabela autônoma, sem TTL — ADMIN faz `TRUNCATE` se precisar invalidar. Coluna `geometry TEXT` adicionada na V13.
+
+**Gateway de geocoding (Photon — novo):**
+- `GeocodingService` (interface) + `PhotonGeocodingService` (impl) — irmão do OSRM, base URL própria (`PHOTON_BASE_URL`), bean `photonWebClient` no `MapsConfig` com os mesmos timeouts.
+- `search(query, biasLat, biasLng, limit)` → forward/autocomplete (**não cacheado**, app faz debounce ~300ms). `reverse(lat, lng)` → pin no mapa, **cacheado** em `geocode_cache` (chave = lat/lng arredondados a 4 casas, sem TTL).
+- `GeoPlace` (record de saída): `displayName`, `lat`, `lng`, `street`, `city`, `state`. Parse do GeoJSON do Photon (coordenadas `[lon, lat]`).
+- `GeocodingController` — `GET /maps/geocode` (autocomplete) e `GET /maps/reverse` (pin), ambos `PASSAGEIRO`/`MOTORISTA`. Geocoding **não toca** o fluxo de corrida: só produz o `lat/lng` que `POST /rides`/`/estimate` já consomem.
+- `MapsUnavailableException` traduzida para HTTP 503 no `GlobalExceptionHandler` — reusada por OSRM e Photon.
 
 ### 2.4 `domain.payment` — Pix simulado
 
@@ -107,6 +118,9 @@ Migrações Flyway:
 - **`V8__ride_share_token.sql`** — coluna `rides.share_token` UUID UNIQUE + backfill para rides ativas.
 - **`V9__pricing_configs.sql`** — tabela `pricing_configs(cidade, category, base, per_km, per_min, …)` com `UNIQUE(cidade, category)` + seed `_DEFAULT` preservando a fórmula histórica.
 - **`V10__chat_messages.sql`** — tabela `chat_messages` (id, **seq BIGSERIAL**, ride_id FK, sender_id, sender_role, body 1–1000, created_at) + índice `(ride_id, seq)`.
+- **`V11__ride_stops.sql`** — tabela `ride_stops` (ride_id FK, seq, lat, lng) para as paradas intermediárias (máx. 5), com `@OrderColumn(seq)`.
+- **`V13__route_geometry.sql`** — coluna `route_cache.geometry TEXT` (polyline cacheada) + coluna `rides.route_geometry TEXT` (polyline da corrida; nula em rides anteriores → front cai em fallback de linha reta).
+- **`V14__geocode_cache.sql`** — tabela `geocode_cache` (id, `coord_hash VARCHAR(64) UNIQUE`, display_name, street, city, state, lat/lng `NUMERIC(10,7)`, created_at) — cache do reverse geocoding.
 
 Pontos fortes do schema:
 - `version BIGINT` em `rides` viabilizando o lock otimista do aceite.
@@ -123,13 +137,15 @@ Pontos fortes do schema:
 
 ```
 1. POST /auth/register {role=PASSAGEIRO, cidade}        → 201 + JWT
-2. POST /rides/estimate {origem, destino, category?}    → preço previsto (sem persistir) via PricingPolicy(cidade)
-3. POST /rides {origem, destino, category?}             → cria PENDING_PAYMENT + share_token gerado automaticamente
+1b. GET /maps/geocode?q=... (digita) | GET /maps/reverse?lat&lng (pin) → resolve endereço → lat/lng
+2. POST /rides/estimate {origem, destino, stops?, category?} → preço previsto + polyline (sem persistir)
+3. POST /rides {origem, destino, stops?, category?}     → cria PENDING_PAYMENT + share_token + route_geometry
 4. POST /rides/{id}/confirm-payment {method}            → AVAILABLE_IN_MURAL (gera BR Code se PIX)
 5. MOTORISTA aprovado faz POST /drivers/me/online       → online=true (bloqueado se suspenso)
 6. GET /rides/mural                                     → lista filtrada por cidade + categoria do motorista
 7. POST /rides/{id}/accept                              → DRIVER_EN_ROUTE (lock otimista + categoria + active check)
-8. Passageiro/contato pode acessar GET /share/{token}   → status, motorista, placa, posição em tempo real (público)
+8. Passageiro/contato pode acessar GET /share/{token}   → status, motorista, placa, posição + polyline (público)
+   GET /rides/{id}/route (1x) → polyline pro mapa | GET /rides/{id}/status-stream → SSE de status
    Passageiro e motorista abrem GET /chat/rides/{id}/stream → chat SSE habilitado nesta janela
 9. PUT /rides/{id}/driver-location (a cada ~10s)        → atualiza coordenadas
    GET /rides/{id} (a cada 5s pelo passageiro)          → retorna ride + distância Haversine + rating do motorista
@@ -164,7 +180,7 @@ ADMIN configura preço por cidade em `PUT /admin/pricing` e suspende contas prob
 - **Chat in-app via SSE** — `GET /chat/rides/{id}/stream` (SSE) + `POST .../messages` + `GET .../messages` (histórico). Habilitado apenas em `DRIVER_EN_ROUTE`/`IN_PROGRESS`. Persistente em `chat_messages` com `seq BIGSERIAL` para reconexão via `Last-Event-ID`. Heartbeat 15s + `closeRide()` no fim da corrida.
 - **Segurança coerente:** stateless, sem refresh token (escopo do MVP), `@PreAuthorize` por endpoint, filtro JWT cobrindo o pipeline. `/share/**` é o único endpoint público fora de `/auth/**`.
 - **GlobalExceptionHandler** traduz exceções de domínio para HTTP semânticos — bom contrato para o frontend.
-- **Cobertura de testes:** `OsrmMapsServiceTest`, `RouteHasherTest`, `AuthControllerWebMvcTest`, `JwtServiceTest`, `CityNormalizerTest` e `RideServiceTest` (Mockito, 29 cenários) cobrindo máquina de estados, regras de role no cancelamento, gating do `driver-location`, delegação do mural e invariante de preço calculado no backend. Lock otimista é validado por inspeção do schema + manualmente via `docs/smoke-test.md` (não tem unit test possível sem Hibernate em runtime).
+- **Cobertura de testes (55, sem Docker/Postgres):** `OsrmMapsServiceTest` (cache hit/miss + backfill de geometria + polyline), `PhotonGeocodingServiceTest` (forward + bias, reverse cache hit/miss, Photon 5xx → 503), `RouteHasherTest`, `AuthControllerWebMvcTest`, `JwtServiceTest`, `CityNormalizerTest` e `RideServiceTest` (Mockito) cobrindo máquina de estados, regras de role no cancelamento, gating do `driver-location`, delegação do mural, paradas, geometria da rota e invariante de preço calculado no backend. Lock otimista é validado por inspeção do schema + manualmente via `docs/smoke-test.md` (não tem unit test possível sem Hibernate em runtime).
 - **Contrato HTTP publicado:** Swagger UI em `/swagger-ui.html`, OpenAPI JSON em `/v3/api-docs`. Bearer scheme global configurado via `OpenApiConfig`.
 - **Smoke test versionado:** `docs/api.http` + `docs/smoke-test.md` permitem validar release ponta-a-ponta em ~10 min.
 
@@ -197,6 +213,8 @@ ADMIN configura preço por cidade em `PUT /admin/pricing` e suspende contas prob
 - UX auxiliares prontas: `POST /rides/estimate` para preview de preço antes de criar; `GET /saved-places` para popular endereços salvos; `POST /rides/{id}/rating` no fim do fluxo; `GET /drivers/me/earnings` para dashboard financeiro do motorista.
 - **Chat em tempo real:** app abre `GET /chat/rides/{id}/stream` (SSE) quando entra em `DRIVER_EN_ROUTE`, manda mensagens via `POST .../messages` e reconecta usando `Last-Event-ID` se a rede cair. Spring entrega o transporte; nenhum broker extra precisa rodar.
 - **Compartilhamento público:** `share_token` vem em todo `RideResponse` (gerado no `@PrePersist`); app gera o link `https://unimove.com/share/{token}` e o passageiro envia pra família. Endpoint não exige auth e expira sozinho ao fim da corrida.
+- **Mapa "estilo Uber":** tiles + render são responsabilidade do app (`flutter_map` + OSM). O backend entrega a **polyline** (Encoded Polyline, precisão 5, compatível com `flutter_polyline_points`): no `POST /rides/estimate` (preview), no `GET /rides/{id}/route` (uma vez, fora do polling) e no `SharedRideResponse`. Linha estática — não entra no polling de 5s. Guia detalhado em `docs/plano-mapa-mvp.md`.
+- **Busca de endereço:** o app resolve texto↔coordenada via `GET /maps/geocode` (autocomplete, debounce ~300ms no app) e `GET /maps/reverse` (pin arrastável, cacheado no backend). O `lat/lng` escolhido alimenta os mesmos campos de `estimate`/`create`. Guia em `docs/plano-busca-endereco.md`.
 
 ### Recomendações antes de plugar o app
 1. ~~**Publicar um contrato.**~~ **Feito.** Swagger UI em `/swagger-ui.html`, OpenAPI JSON em `/v3/api-docs`, bearer scheme global via `OpenApiConfig`.
@@ -213,7 +231,7 @@ ADMIN configura preço por cidade em `PUT /admin/pricing` e suspende contas prob
 3. ✅ **Coleção HTTP versionada** — `docs/api.http`.
 4. ✅ **Smoke test ponta-a-ponta** — `docs/smoke-test.md`.
 5. ✅ **Estimativa de preço, rating bidirecional, favoritos, earnings, taxa de cancelamento, categorias MOTO/CARRO.**
-6. ✅ **Suspensão de usuário, compartilhamento público de viagem, tarifa configurável por cidade, chat in-app via SSE.**
+6. ✅ **Suspensão de usuário, compartilhamento público de viagem, tarifa configurável por cidade, chat in-app via SSE, status da corrida via SSE, múltiplas paradas, geometria da rota pro mapa (polyline) e busca de endereço (geocoding via Photon).**
 7. **Próximas features de produto:**
    - **Denúncia + bloqueio mútuo** — passageiro/motorista denuncia o outro; mural filtra corridas de bloqueados. Combina bem com a suspensão já existente.
    - **Código de embarque (4 dígitos)** — gerado em `accept`, validado no `start` — evita "entrei no carro errado".

@@ -21,17 +21,19 @@ Flutter app  ─HTTP/JSON─────►  Spring Boot (monolito)
    │                              ├── domain.ride     (mural, FSM, pricing dinâmico, rating, cancelamento,
    │ SSE p/ chat in-app           │                    ganhos, share público da viagem)
    │                              ├── domain.chat     (chat in-app via SSE entre passageiro e motorista)
-Browser/zap ─GET /share/{token}─► ├── domain.maps     (gateway OSRM + cache local)
+Browser/zap ─GET /share/{token}─► ├── domain.maps     (gateway OSRM rotas+polyline + Photon geocoding + cache local)
    (sem auth)                     ├── domain.payment  (Pix/Dinheiro simulado)
                                   └── shared          (security, exception handler, utils)
                                   │
                   PostgreSQL ◄────┘
                        │
-                       ├── route_cache       (hits antes de bater no OSRM público)
+                       ├── route_cache       (hits antes de bater no OSRM público; guarda a polyline)
+                       ├── geocode_cache      (reverse geocoding cacheado; lat/lng arredondado)
                        ├── pricing_configs   (tarifa por cidade/categoria, editável pelo ADMIN)
                        └── chat_messages     (histórico do chat com seq BIGSERIAL)
                               │
-                              └── OSRM público (router.project-osrm.org) — fallback no miss
+                              ├── OSRM público (router.project-osrm.org) — rotas, fallback no miss
+                              └── Photon público (photon.komoot.io) — geocoding, fallback no miss
 ```
 
 Cada `domain.X` expõe **só interfaces/DTOs**. Nenhum domínio importa entidade JPA de outro — `RideService` fala com motoristas via `DriverService`, com mapas via `MapsService`, com pagamento via `PaymentService`. `ChatService` fala com `RideService.assertChatAllowed` e o `SharedRideController` compõe sua resposta via `UserAccountService.findPublicInfo` + `DriverService.findPublicInfo` (DTOs públicos). Isso permite quebrar em microserviços depois sem reescrita.
@@ -158,6 +160,18 @@ A fórmula `preco = base + per_km * km + per_min * min` continua a mesma, mas os
 
 **Por quê:** preço é a alavanca mais importante de teste do produto. Travar a fórmula em código exigiria deploy pra ajustar. Com a tabela, ADMIN testa "MOTO 20% mais barato no piloto de Catanduva" em segundos. Quando rodar com múltiplas instâncias, o `reload()` precisará virar evento pub/sub (Redis ou Postgres `LISTEN`).
 
+### 3.17 **Geometria da rota pro mapa** (polyline), não navegação turn-by-turn
+
+O mapa "estilo Uber" é renderizado **no app** (`flutter_map` + tiles OSM) — tiles não tocam o backend. O backend só entrega a **linha do trajeto**: o OSRM passou a ser chamado com `overview=full&geometries=polyline` (Encoded Polyline, precisão 5, compatível com `flutter_polyline_points`). A polyline é cacheada em `route_cache.geometry`, gravada em `rides.route_geometry` no `create`, e exposta no `EstimateResponse` (preview), no `GET /rides/{id}/route` (`RideRouteResponse`) e no `SharedRideResponse`.
+
+**Por quê:** navegação turn-by-turn com recálculo por desvio e voz é a camada **paga** dos apps reais. Pro MVP a linha do trajeto basta pra UX "vejo meu caminho no mapa". Decisão deliberada: a geometria é **estática** durante a corrida, então **não entra** no `RideResponse` do polling de 5s (regra 3 — polling leve); o app busca **uma vez** via `GET /rides/{id}/route` e segue só com polling/SSE pra status + posição do motorista. Hits antigos do `route_cache` sem geometria disparam um backfill único; rides anteriores à V13 ficam com `route_geometry` nulo → front cai em fallback de linha reta.
+
+### 3.18 **Busca de endereço (geocoding via Photon)**, não Nominatim nem Google Places
+
+Pra o app definir origem/destino/paradas estilo Uber/99 há dois caminhos: **digitar** (`GET /maps/geocode?q=...`, autocomplete) ou **arrastar o pin** (`GET /maps/reverse?lat&lng`). Provedor: **Photon** (OSM, grátis, sem chave) — segundo gateway no `domain.maps`, irmão do OSRM, base URL própria (`PHOTON_BASE_URL`). **Cache assimétrico:** o reverse é cacheado (`geocode_cache`, chave = lat/lng arredondado a 4 casas, sem TTL); o forward **não** é cacheado (queries parciais têm baixa taxa de hit) — o app protege o fair-use do Photon com **debounce de ~300ms**. O app passa `lat`/`lng` (centro do mapa/GPS) pra enviesar resultados — substituto pragmático do escopo por cidade.
+
+**Por quê Photon e não Nominatim:** o requisito-cabeça é **autocomplete "as you type"**, que a instância pública do Nominatim **proíbe** e não foi desenhada pra fazer. Photon resolve forward **e** reverse num provedor só, mesmo espírito grátis/OSM/self-hostável do OSRM. **Por quê não Google Places:** custa por request e exige chave/billing — fora da filosofia R$ 0 do MVP. Geocoding **não toca** o fluxo de corrida: só produz o `lat/lng` que `POST /rides`/`/estimate` já consomem. Erros do Photon → `MapsUnavailableException` (HTTP 503).
+
 ---
 
 ## 4. O que ficou de fora do MVP (e por quê)
@@ -165,7 +179,9 @@ A fórmula `preco = base + per_km * km + per_min * min` continua a mesma, mas os
 | Feature | Razão de ficar de fora |
 |---|---|
 | Upload e validação automática de CNH/CRLV | Custo de integração + custo de OCR/antifraude. Aprovação manual resolve. |
-| Mapa síncrono curva-a-curva | OSRM público + cache + Haversine cobrem a UX necessária. |
+| Navegação turn-by-turn (recálculo por desvio + voz) | Camada paga dos apps reais. A polyline estática (`/rides/{id}/route`) + Haversine cobrem a UX do MVP. |
+| Geocoding pago (Google Places) | Photon (OSM) faz forward + reverse de graça, sem chave. |
+| Tiles de mapa no backend | Render é 100% do app (`flutter_map` + OSM). Backend só entrega a polyline. |
 | Gateway de pagamento real | Validação de modelo não depende disso. |
 | Disparo por raio + push individual | Mural global resolve com 1% da complexidade. |
 | WebSockets | Short polling cobre o ciclo da corrida; SSE cobre o chat. |
@@ -242,20 +258,32 @@ A fórmula `preco = base + per_km * km + per_min * min` continua a mesma, mas os
 **`POST /drivers/me/online`**
 ✅ `online=true`, `last_seen_at` atualizado. Já pode ver o mural.
 
+#### Passo 5.5 — Passageiro acha o endereço (geocoding — fluxo real do app)
+**`Authorize`** com `TOKEN_ANA`.
+
+**Digitar (autocomplete):** `GET /maps/geocode?q=avenida brasil&limit=5&lat=-20.8113&lng=-49.3758`
+✅ Retorna `List<GeoPlace>` (`displayName`, `lat`, `lng`, `street`, `city`, `state`) pro dropdown. O `lat`/`lng` enviesa pro centro do mapa. No app, dispare com **debounce de ~300ms** (forward não é cacheado).
+
+**Arrastar o pin:** `GET /maps/reverse?lat=-20.7950&lng=-49.4050`
+✅ Retorna um `GeoPlace` com o endereço daquele ponto. **Cacheado** em `geocode_cache` — repetir coordenadas próximas não rebate no Photon.
+
+O `lat/lng` escolhido (dropdown ou pin) alimenta os campos de origem/destino/`stops` dos passos 6 e 7.
+
 #### Passo 6 — Passageiro estima preço (opcional, mas é o fluxo real do app)
 **`Authorize`** com `TOKEN_ANA`.
 
-**`POST /rides/estimate`**
+**`POST /rides/estimate`** (`stops` é opcional, máx. 5 paradas)
 ```json
 {
   "latOrigem": -20.8113,
   "lngOrigem": -49.3758,
   "latDestino": -20.7950,
   "lngDestino": -49.4050,
+  "stops": [ { "lat": -20.8000, "lng": -49.3900 } ],
   "category": "MOTO"
 }
 ```
-✅ Retorna `{ "distanciaKm": ..., "tempoMin": ..., "preco": ... }`. Primeira chamada vai no OSRM; chamadas subsequentes com mesmo par de coordenadas batem no `route_cache`.
+✅ Retorna `{ "distanciaKm": ..., "tempoMin": ..., "preco": ..., "geometry": "<polyline>" }`. A `geometry` (Encoded Polyline precisão 5) já permite o app desenhar o trajeto no preview. Primeira chamada vai no OSRM; chamadas subsequentes com a mesma sequência de coordenadas batem no `route_cache`.
 
 #### Passo 7 — Passageiro cria a corrida
 **`POST /rides`**
@@ -287,6 +315,14 @@ A fórmula `preco = base + per_km * km + per_min * min` continua a mesma, mas os
 #### Passo 10 — Motorista aceita
 **`POST /rides/{RIDE_ID}/accept`**
 ✅ Status → `DRIVER_EN_ROUTE`. Se outro motorista tentar aceitar, recebe **409** (lock otimista).
+
+#### Passo 10.1 — App busca a geometria da rota pro mapa (uma vez)
+**`GET /rides/{RIDE_ID}/route`** (passageiro ou motorista)
+✅ Retorna `{ "geometry": "<polyline>" }`. O app decodifica e desenha a linha sobre os tiles OSM. **Buscado uma única vez** — a geometria é estática; status e posição do motorista seguem por polling/SSE (fora do polling leve de 5s, regra 3). Em rides anteriores à V13 a `geometry` pode vir nula → app usa fallback de linha reta.
+
+#### Passo 10.2 — App assina o stream de status (opcional, UX "Uber")
+**`GET /rides/{RIDE_ID}/status-stream`** (SSE — use `curl -N` no terminal)
+✅ Na conexão o servidor emite um **snapshot** do estado atual; depois empurra cada transição (`afterCommit`). Eventos terminais (`COMPLETED`/`CANCELLED`/`EXPIRED`) fecham o stream. Não substitui o polling de `GET /rides/{id}` (fonte de verdade).
 
 #### Passo 11 — Motorista atualiza localização (simulando deslocamento)
 **`PUT /rides/{RIDE_ID}/driver-location`**
@@ -391,9 +427,14 @@ curl -N -H "Authorization: Bearer $TOKEN_BRUNO" \
 | Suspender ADMIN | `POST /admin/users/{id-admin}/suspend` | 403 `CannotSuspendAdminException` |
 | Deletar pricing `_DEFAULT` | `DELETE /admin/pricing?cidade=_DEFAULT&category=CARRO` | 403 `CannotDeleteDefaultPricingException` |
 | Pricing por cidade override | PUT em SJRP, depois `/rides/estimate` em SJRP vs outra cidade | Preços diferem |
+| Geocode com query curta | `GET /maps/geocode?q=av` (2 chars) | 400 (Bean Validation, mín. 3) |
+| Reverse cacheado | `GET /maps/reverse?lat&lng` 2x com mesmas coords | 2ª vem do `geocode_cache`, sem rebater no Photon |
+| Geometria da rota | `GET /rides/{id}/route` numa ride criada pós-V13 | `geometry` não nula (polyline) |
+| Corrida com paradas | `POST /rides` com `stops` (≤5) | Rota = `[origem,...paradas,destino]`; preço pela rota total |
+| Paradas acima do limite | `POST /rides` com 6 `stops` | 400 (`@Size`) |
 
 ---
 
 ## 6. Resumo de uma linha
 
-**UniMove troca complexidade técnica por foco em mercado:** mural global ao invés de match geoespacial, polling ao invés de WebSockets, SSE ao invés de WebSocket pro chat, pagamento simulado ao invés de PSP real, aprovação manual ao invés de OCR, suspensão assimétrica ao invés de revogação por request, tarifa em tabela ao invés de surge dinâmico — tudo isso para subir o produto numa cidade-piloto com infra mínima e iterar a partir do uso real, sem queimar capital tentando ser Uber no dia 1. As features que **sobraram** (share público, chat in-app sem expor telefone, ADMIN com controle real de preço e contas) são exatamente as que cidade pequena percebe como diferencial.
+**UniMove troca complexidade técnica por foco em mercado:** mural global ao invés de match geoespacial, polling ao invés de WebSockets, SSE ao invés de WebSocket pro chat, pagamento simulado ao invés de PSP real, aprovação manual ao invés de OCR, suspensão assimétrica ao invés de revogação por request, tarifa em tabela ao invés de surge dinâmico, polyline estática + Photon/OSM grátis ao invés de turn-by-turn e geocoding pago — tudo isso para subir o produto numa cidade-piloto com infra mínima e iterar a partir do uso real, sem queimar capital tentando ser Uber no dia 1. As features que **sobraram** (share público, chat in-app sem expor telefone, mapa com trajeto desenhado, busca de endereço com autocomplete, ADMIN com controle real de preço e contas) são exatamente as que cidade pequena percebe como diferencial.

@@ -1,12 +1,18 @@
-# Plano — Busca de endereço + pin no mapa (geocoding) estilo Uber/99
+# Busca de endereço + pin no mapa (geocoding) estilo Uber/99
 
+> **Status:** ✅ **Implementado** (branch `feature/geocoding-enderecos`, migration `V14`,
+> regra 20 do `CLAUDE.md`). Os endpoints `GET /maps/geocode` e `GET /maps/reverse` já
+> existem, estão testados e prontos pro app consumir. Este documento serve tanto de
+> registro da decisão quanto de **guia de integração pro dev mobile** (§3, §7, §9).
+>
 > **Objetivo:** permitir que o passageiro defina origem/destino/paradas das duas formas
 > que Uber e 99 oferecem:
 > 1. **Digitando** o endereço e o app sugerindo resultados (autocomplete) → *forward geocoding*.
 > 2. **Arrastando o pin** no mapa e o app mostrando o nome da rua daquele ponto → *reverse geocoding*.
 >
-> Ambos resolvem o mesmo problema: o backend hoje só aceita `lat/lng` (regra 2,
-> `StopPoint`/`CreateRideRequest`). Falta a ponte **texto ↔ coordenada**.
+> Ambos resolvem o mesmo problema: o backend só aceita `lat/lng` (regra 2,
+> `StopPoint`/`CreateRideRequest`). Estes endpoints são a ponte **texto ↔ coordenada**;
+> o `lat/lng` escolhido alimenta os mesmos campos de `POST /rides/estimate` e `POST /rides`.
 
 ---
 
@@ -150,3 +156,104 @@ no `MapsConfig` com os mesmos timeouts do OSRM.
 - Centróide/bounding-box de cidade no banco (bias é via ponto enviado pelo app).
 - Cache de autocomplete (resolvido com debounce no app).
 - Self-host do Photon (só quando o público virar gargalo — igual OSRM).
+
+---
+
+## 9. Integração no app (exemplos concretos)
+
+### 9.1 Forward / autocomplete — `GET /maps/geocode`
+
+**Request**
+```
+GET /maps/geocode?q=avenida%20brasil&limit=5&lat=-20.8197&lng=-49.3794
+Authorization: Bearer <jwt>
+```
+
+**Response `200`** (`List<GeoPlace>`)
+```json
+[
+  {
+    "displayName": "Avenida Brasil, 1200 — Centro",
+    "lat": -20.8201,
+    "lng": -49.3788,
+    "street": "Avenida Brasil",
+    "city": "São José do Rio Preto",
+    "state": "São Paulo"
+  },
+  {
+    "displayName": "Avenida Brasil — Higienópolis",
+    "lat": -20.8155,
+    "lng": -49.3760,
+    "street": "Avenida Brasil",
+    "city": "São José do Rio Preto",
+    "state": "São Paulo"
+  }
+]
+```
+
+Cada item do array vira uma linha do dropdown (`displayName`). Ao tocar, o app guarda
+`lat`/`lng` daquele `GeoPlace` como origem/destino/parada.
+
+### 9.2 Reverse / pin no mapa — `GET /maps/reverse`
+
+**Request**
+```
+GET /maps/reverse?lat=-20.8197&lng=-49.3794
+Authorization: Bearer <jwt>
+```
+
+**Response `200`** (um `GeoPlace`)
+```json
+{
+  "displayName": "Rua General Glicério, 300 — Boa Vista",
+  "lat": -20.8197,
+  "lng": -49.3794,
+  "street": "Rua General Glicério",
+  "city": "São José do Rio Preto",
+  "state": "São Paulo"
+}
+```
+
+### 9.3 Erros
+
+| HTTP | Quando | Body |
+|------|--------|------|
+| `400` | `q` com menos de 3 chars, `limit` fora de 1–10, `lat`/`lng` fora de faixa | erro de validação padrão |
+| `401` | sem JWT / token expirado | — |
+| `503` | Photon indisponível/timeout (`MapsUnavailableException`) | `{ "message": "..." }` — app mostra "Busca indisponível, tente de novo" |
+
+### 9.4 Snippet Flutter (debounce + reverse)
+
+```dart
+// ---- Autocomplete com debounce de 300ms (regra 4: forward NÃO é cacheado) ----
+Timer? _debounce;
+
+void onSearchChanged(String q, LatLng mapCenter) {
+  _debounce?.cancel();
+  if (q.trim().length < 3) return;            // backend exige mín. 3 chars
+  _debounce = Timer(const Duration(milliseconds: 300), () async {
+    final r = await dio.get('/maps/geocode', queryParameters: {
+      'q': q,
+      'limit': 5,
+      'lat': mapCenter.latitude,              // bias pro centro do mapa/GPS
+      'lng': mapCenter.longitude,
+    });
+    final sugestoes = (r.data as List)
+        .map((e) => GeoPlace.fromJson(e))
+        .toList();                            // -> alimenta o dropdown
+  });
+}
+
+// ---- Pin arrastável: ao soltar, descobre a rua ----
+Future<void> onPinDragEnd(LatLng pos) async {
+  final r = await dio.get('/maps/reverse', queryParameters: {
+    'lat': pos.latitude,
+    'lng': pos.longitude,
+  });
+  final place = GeoPlace.fromJson(r.data);    // mostra place.displayName como confirmação
+}
+```
+
+O `lat`/`lng` escolhido (do dropdown ou do pin) vai direto pros campos
+`latOrigem/lngOrigem/latDestino/lngDestino/stops` de `POST /rides/estimate` e
+`POST /rides` — **nada muda no fluxo de corrida**.
