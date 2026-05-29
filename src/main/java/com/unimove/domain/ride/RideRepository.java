@@ -126,6 +126,38 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
         java.math.BigDecimal getGross();
     }
 
+    interface RecentDestinationRow {
+        String getAddress();
+        java.math.BigDecimal getLat();
+        java.math.BigDecimal getLng();
+        Instant getLastUsedAt();
+    }
+
+    /**
+     * Destinos recentes distintos do passageiro (tela "para onde vamos?", estilo Uber).
+     * Dedup por coordenada arredondada a 4 casas (~11m, mesma precisao do route_cache,
+     * regra 11) mantendo a ocorrencia mais recente; ordena por recencia e limita.
+     * So considera corridas com endereco textual — coordenada solta nao vira sugestao.
+     * Consulta de baixa frequencia (abertura da tela), fora do polling de 5s (regra 3).
+     */
+    @Query(value = """
+            SELECT address, lat, lng, last_used_at FROM (
+                SELECT DISTINCT ON (ROUND(lat_destino, 4), ROUND(lng_destino, 4))
+                       destino_endereco AS address,
+                       lat_destino      AS lat,
+                       lng_destino      AS lng,
+                       created_at       AS last_used_at
+                FROM rides
+                WHERE passageiro_id = :passageiroId
+                  AND destino_endereco IS NOT NULL
+                ORDER BY ROUND(lat_destino, 4), ROUND(lng_destino, 4), created_at DESC
+            ) recent
+            ORDER BY last_used_at DESC
+            LIMIT :limit
+            """, nativeQuery = true)
+    List<RecentDestinationRow> findRecentDestinations(@Param("passageiroId") UUID passageiroId,
+                                                      @Param("limit") int limit);
+
     @Query(value = """
             SELECT CAST(completed_at AS DATE) AS day,
                    COUNT(*) AS rides,

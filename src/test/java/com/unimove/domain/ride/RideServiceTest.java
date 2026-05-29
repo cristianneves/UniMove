@@ -14,6 +14,7 @@ import com.unimove.domain.ride.dto.CreateRideRequest;
 import com.unimove.domain.ride.dto.EstimateRequest;
 import com.unimove.domain.ride.dto.EstimateResponse;
 import com.unimove.domain.ride.dto.RatingResponse;
+import com.unimove.domain.ride.dto.RecentDestinationResponse;
 import com.unimove.domain.ride.dto.RideResponse;
 import com.unimove.domain.ride.dto.RideStatusEvent;
 import com.unimove.domain.ride.dto.StopPoint;
@@ -165,6 +166,66 @@ class RideServiceTest {
         ArgumentCaptor<Ride> saved = ArgumentCaptor.forClass(Ride.class);
         verify(rideRepository).save(saved.capture());
         assertThat(saved.getValue().getStops()).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("create: persiste endereco textual de origem/destino (trim, vazio vira null)")
+    void createPersistsTrimmedAddresses() {
+        when(mapsService.route(anyList()))
+                .thenReturn(new RouteInfo(new BigDecimal("5.000"), 12, "poly_addr"));
+        when(pricingPolicy.calculate(any(BigDecimal.class), eq(12), any(RideCategory.class), anyString()))
+                .thenReturn(new BigDecimal("18.40"));
+        when(rideRepository.save(any(Ride.class))).thenAnswer(inv -> {
+            Ride r = inv.getArgument(0);
+            if (r.getId() == null) r.setId(UUID.randomUUID());
+            return r;
+        });
+
+        CreateRideRequest req = new CreateRideRequest(
+                new BigDecimal("-20.82000"), new BigDecimal("-49.38000"),
+                new BigDecimal("-20.83000"), new BigDecimal("-49.39000"),
+                RideCategory.CARRO, "  Rua A, 100  ", "   ", null);
+
+        rideService.create(pax, req);
+
+        ArgumentCaptor<Ride> saved = ArgumentCaptor.forClass(Ride.class);
+        verify(rideRepository).save(saved.capture());
+        assertThat(saved.getValue().getOrigemEndereco()).isEqualTo("Rua A, 100");
+        assertThat(saved.getValue().getDestinoEndereco()).isNull(); // blank → null
+    }
+
+    // ------------------------------------------------------------------------
+    // recentDestinations()
+    // ------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("recentDestinations: delega ao repository e mapeia as linhas")
+    void recentDestinationsMapsRows() {
+        Instant when = Instant.now();
+        when(rideRepository.findRecentDestinations(eq(pax.userId()), eq(5)))
+                .thenReturn(List.of(row("Shopping", "-20.81", "-49.37", when)));
+
+        List<RecentDestinationResponse> out = rideService.recentDestinations(pax, 5);
+
+        assertThat(out).hasSize(1);
+        assertThat(out.get(0).address()).isEqualTo("Shopping");
+        assertThat(out.get(0).lat()).isEqualByComparingTo("-20.81");
+        assertThat(out.get(0).lastUsedAt()).isEqualTo(when);
+    }
+
+    @Test
+    @DisplayName("recentDestinations: saneia o limite para [1, 20]")
+    void recentDestinationsClampsLimit() {
+        when(rideRepository.findRecentDestinations(eq(pax.userId()), org.mockito.ArgumentMatchers.anyInt()))
+                .thenReturn(List.of());
+
+        rideService.recentDestinations(pax, 999);
+        rideService.recentDestinations(pax, 0);
+
+        ArgumentCaptor<Integer> limit = ArgumentCaptor.forClass(Integer.class);
+        verify(rideRepository, org.mockito.Mockito.times(2))
+                .findRecentDestinations(eq(pax.userId()), limit.capture());
+        assertThat(limit.getAllValues()).containsExactly(20, 1);
     }
 
     // ------------------------------------------------------------------------
@@ -785,6 +846,15 @@ class RideServiceTest {
     // ------------------------------------------------------------------------
     // Builders auxiliares
     // ------------------------------------------------------------------------
+
+    private static RideRepository.RecentDestinationRow row(String address, String lat, String lng, Instant when) {
+        return new RideRepository.RecentDestinationRow() {
+            public String getAddress() { return address; }
+            public BigDecimal getLat() { return new BigDecimal(lat); }
+            public BigDecimal getLng() { return new BigDecimal(lng); }
+            public Instant getLastUsedAt() { return when; }
+        };
+    }
 
     private static CreateRideRequest defaultRequest() {
         return new CreateRideRequest(

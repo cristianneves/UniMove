@@ -7,6 +7,7 @@ import com.unimove.domain.ride.dto.CreateRideRequest;
 import com.unimove.domain.ride.dto.EstimateRequest;
 import com.unimove.domain.ride.dto.EstimateResponse;
 import com.unimove.domain.ride.dto.RatingResponse;
+import com.unimove.domain.ride.dto.RecentDestinationResponse;
 import com.unimove.domain.ride.dto.RideHistoryItem;
 import com.unimove.domain.ride.dto.RideMuralItem;
 import com.unimove.domain.ride.dto.RideResponse;
@@ -81,6 +82,13 @@ public class RideController {
                                          @RequestParam(required = false) RideStatus status,
                                          @PageableDefault(size = 20) Pageable pageable) {
         return rideService.history(user, status, pageable);
+    }
+
+    @GetMapping("/recent-destinations")
+    @PreAuthorize("hasRole('PASSAGEIRO')")
+    public List<RecentDestinationResponse> recentDestinations(@AuthenticationPrincipal AuthenticatedUser user,
+                                                              @RequestParam(defaultValue = "5") int limit) {
+        return rideService.recentDestinations(user, limit);
     }
 
     @PostMapping("/{id}/accept")

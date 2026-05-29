@@ -60,6 +60,17 @@ public class Ride {
     private BigDecimal lngDestino;
 
     /**
+     * Texto do endereco resolvido pelo app via geocoding (regra 20) ao montar a
+     * corrida. Nullable — corridas antigas e requests sem endereco ficam nulos.
+     * Alimenta a lista de destinos recentes (GET /rides/recent-destinations).
+     */
+    @Column(name = "origem_endereco", length = 200)
+    private String origemEndereco;
+
+    @Column(name = "destino_endereco", length = 200)
+    private String destinoEndereco;
+
+    /**
      * Paradas intermediarias ordenadas entre origem e destino. Lazy: nao impacta
      * as projecoes leves do mural/historico (que nao carregam a entidade).
      */
