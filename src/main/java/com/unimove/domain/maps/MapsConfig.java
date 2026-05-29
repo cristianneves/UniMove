@@ -11,17 +11,26 @@ import reactor.netty.http.client.HttpClient;
 import java.time.Duration;
 
 @Configuration
-@EnableConfigurationProperties(OsrmProperties.class)
+@EnableConfigurationProperties({OsrmProperties.class, PhotonProperties.class})
 class MapsConfig {
 
     @Bean
     WebClient osrmWebClient(OsrmProperties props) {
+        return buildClient(props.baseUrl());
+    }
+
+    @Bean
+    WebClient photonWebClient(PhotonProperties props) {
+        return buildClient(props.baseUrl());
+    }
+
+    private static WebClient buildClient(String baseUrl) {
         HttpClient httpClient = HttpClient.create()
                 .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 3_000)
                 .responseTimeout(Duration.ofSeconds(5));
 
         return WebClient.builder()
-                .baseUrl(props.baseUrl())
+                .baseUrl(baseUrl)
                 .clientConnector(new ReactorClientHttpConnector(httpClient))
                 .build();
     }

@@ -31,6 +31,8 @@ app:
     expiration-ms: ${JWT_EXPIRATION_MS:86400000}
   osrm:
     base-url: ${OSRM_BASE_URL:https://router.project-osrm.org}
+  photon:
+    base-url: ${PHOTON_BASE_URL:https://photon.komoot.io}
   ride:
     # Formula de tarifa — centralizada para ajuste facil.
     bandeira: 5.50
