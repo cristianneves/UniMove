@@ -171,6 +171,19 @@ Só no app do motorista, enquanto a corrida está em `DRIVER_EN_ROUTE` ou `IN_PR
 ```
 É isso que faz o pin se mover no app do passageiro (via 4.4). O passageiro **não** chama este endpoint.
 
+### 4.6.1 `GET /maps/geocode` e `GET /maps/reverse` — definir os pontos (busca de endereço)
+Como o usuário escolhe origem/destino/paradas (estilo Uber/99). Detalhes completos em
+[`plano-busca-endereco.md`](./plano-busca-endereco.md). Resumo:
+
+- **Digitar e achar (autocomplete):** `GET /maps/geocode?q=<texto>&lat=<bias>&lng=<bias>&limit=5`
+  → `List<GeoPlace>` para um dropdown. `lat/lng` opcionais = centro do mapa/GPS (enviesa o
+  resultado pra perto). **Faça debounce de ~300ms** no campo de busca (só dispara quando o
+  usuário para de digitar) — protege o provedor e evita requisição a cada tecla.
+- **Arrastar o pin:** `GET /maps/reverse?lat=<lat>&lng=<lng>` → um `GeoPlace` com o endereço
+  do ponto, pra confirmar ("Av. Brasil, 1200 — Centro").
+- `GeoPlace`: `{ "displayName", "lat", "lng", "street", "city", "state" }`. O `lat/lng`
+  escolhido alimenta os mesmos campos de `POST /rides/estimate` e `POST /rides`.
+
 ### 4.7 `GET /share/{token}` — página pública de acompanhamento (sem auth)
 Para um terceiro (família) acompanhar pelo link do WhatsApp. Retorna `SharedRideResponse`
 com `geometry`, coordenadas, `stops`, nome/placa/rating do motorista e

@@ -64,7 +64,8 @@ Monolito modular por dominio (detalhes em `CLAUDE.md`):
 com.unimove
 ├── domain.user       Auth, JWT, driver online/offline, admin, favoritos,         [implementado]
 │                     ratings, suspensao de usuario
-├── domain.maps       Gateway OSRM + cache de rotas (MapsService)                  [implementado]
+├── domain.maps       Gateway OSRM (rotas + geometria/polyline) + cache de rotas,  [implementado]
+│                     gateway Photon (geocoding: busca de endereço + pin no mapa)
 ├── domain.ride       Mural, maquina de estados, tarifa dinamica (pricing_configs), [implementado]
 │                     polling, estimate, rating bi, taxa de cancelamento,
 │                     categorias MOTO/CARRO, earnings do motorista,
@@ -96,6 +97,7 @@ com.unimove
 | `JWT_SECRET`          | —                                  | **sim**     |
 | `JWT_EXPIRATION_MS`   | `86400000` (24h)                   | nao         |
 | `OSRM_BASE_URL`       | `https://router.project-osrm.org`  | nao         |
+| `PHOTON_BASE_URL`     | `https://photon.komoot.io`         | nao         |
 | `SPRING_PROFILES_ACTIVE` | `dev`                           | nao         |
 
 Veja `.env.example` para o template completo.
@@ -118,10 +120,10 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 | Bloco                       | Status        | Observacoes |
 |-----------------------------|---------------|-------------|
 | Scaffold (pom, profiles)    | concluido     | Spring Boot 3.3.5 + Java 21 |
-| Schema (`V1`-`V10`)         | concluido     | users (com `status`), drivers, rides (com `@Version` e `share_token`), route_cache, ride_ratings, saved_places, cancellation_fee, category, pricing_configs, chat_messages |
+| Schema (`V1`-`V14`)         | concluido     | users (com `status`), drivers, rides (com `@Version`, `share_token` e `route_geometry`), route_cache (com `geometry`), ride_ratings, saved_places, cancellation_fee, category, pricing_configs, chat_messages, ride_stops, geocode_cache |
 | `shared` (security, JWT, exception handler) | concluido | `GlobalExceptionHandler` cobre validacao, lock otimista, `BusinessException` |
 | `domain.user`               | concluido     | `/auth/*`, online/offline, admin approve, `/saved-places`, denormalizacao de rating, **suspensao/reativacao via `/admin/users/*`** |
-| `domain.maps`               | concluido     | `MapsService` + `OsrmMapsService` (cache-aside via `route_cache`) |
+| `domain.maps`               | concluido     | `MapsService` + `OsrmMapsService` (cache-aside via `route_cache`, polyline pro mapa); `GeocodingService` + `PhotonGeocodingService` (busca de endereço/`reverse` via Photon, `geocode_cache`) |
 | `domain.payment`            | concluido     | `SimulatedPaymentService` — BR Code ficticio (sem PSP real) |
 | `domain.ride`               | concluido     | Criacao, estimate, mural por cidade+categoria, aceite (lock otimista), state machine, cancelamento com taxa, polling, rating bi, earnings, **share publico em `/share/{token}`** |
 | `domain.chat`               | concluido     | **Chat in-app via SSE em `/chat/rides/{id}/*` — habilitado durante `DRIVER_EN_ROUTE`/`IN_PROGRESS`** |
@@ -135,6 +137,9 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 | Share publico da viagem     | concluido     | `share_token` em toda ride; `GET /share/{token}` publico, 410 ao terminar |
 | Tarifa configuravel         | concluido     | `pricing_configs(cidade, category, base, per_km, per_min)` + cache em memoria; ADMIN edita via `PUT /admin/pricing` |
 | Chat in-app via SSE         | concluido     | `chat_messages.seq BIGSERIAL` + `Last-Event-ID` pra reconexao; heartbeat 15s |
+| Multiplas paradas           | concluido     | `stops` (max 5) em `POST /rides`/`/estimate`; tabela `ride_stops`; rota como sequencia de waypoints |
+| Geometria da rota (mapa)    | concluido     | OSRM `overview=full&geometries=polyline`; `GET /rides/{id}/route`, polyline no estimate/share; `route_geometry` + `route_cache.geometry` |
+| Busca de endereco (geocoding) | concluido   | `GET /maps/geocode` (autocomplete) + `GET /maps/reverse` (pin) via Photon; `reverse` cacheado em `geocode_cache` |
 | OpenAPI / Swagger UI        | concluido     | `springdoc-openapi` em `/swagger-ui.html` |
 | Coleção HTTP / smoke test   | concluido     | `docs/api.http` + `docs/smoke-test.md` |
 
@@ -146,9 +151,10 @@ Cobertura atual (`mvn test`):
 - `JwtServiceTest` — emissao e validacao de token
 - `CityNormalizerTest` — normalizacao de cidade
 - `RouteHasherTest` — hash deterministico das rotas OSRM
-- `OsrmMapsServiceTest` — cache hit/miss, OSRM 5xx, payload vazio, race no insert
-- `RideServiceTest` (Mockito, 29 cenários) — máquina de estados ponta-a-ponta, regras de role no cancelamento, gating do `driver-location`, delegação do mural por cidade + categoria, invariante de preço calculado no backend a partir do OSRM, submitRating cross-role
+- `OsrmMapsServiceTest` — cache hit/miss (incl. backfill de geometria), OSRM 5xx, payload vazio, race no insert, polyline persistida
+- `PhotonGeocodingServiceTest` — forward (sugestões + bias lat/lon), query vazia sem chamada, reverse cache miss/hit, Photon 5xx → 503, sem features → 503
+- `RideServiceTest` (Mockito) — máquina de estados ponta-a-ponta, regras de role no cancelamento, gating do `driver-location`, delegação do mural por cidade + categoria, invariante de preço calculado no backend a partir do OSRM, submitRating cross-role, paradas e geometria da rota
 
-Total: **51 testes** passando em ~6 s (sem Docker/Postgres).
+Total: **55 testes** passando em ~6 s (sem Docker/Postgres).
 
 > **Lock otimista:** não é exercitado em unit test (depende do `@Version` do Hibernate em runtime). A garantia vem do schema (`rides.version`) + tradução de `ObjectOptimisticLockingFailureException` para HTTP 409 no `GlobalExceptionHandler`. Valide manualmente via `docs/smoke-test.md` seção 5 (aceite por dois motoristas).
