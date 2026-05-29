@@ -77,6 +77,16 @@ public class Ride {
     @Column(name = "preco", nullable = false, precision = 10, scale = 2)
     private BigDecimal preco;
 
+    /**
+     * Polyline codificada (precisao 5) do trajeto origem→...→destino, capturada
+     * do OSRM na criacao. Usada pelo front para desenhar a linha da rota no mapa.
+     * Coluna TEXT propria da rides; NAO entra nas projecoes leves do mural/historico
+     * (regra 3) nem no polling de GET /rides/{id} — exposta sob demanda em
+     * GET /rides/{id}/route (regra 19).
+     */
+    @Column(name = "route_geometry", columnDefinition = "TEXT")
+    private String routeGeometry;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "category", nullable = false, length = 20)
     private RideCategory category;

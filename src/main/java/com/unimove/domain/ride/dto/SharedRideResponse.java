@@ -25,6 +25,10 @@ public record SharedRideResponse(
         BigDecimal lngDestino,
         List<StopPoint> stops,
 
+        // Polyline codificada (precisao 5) do trajeto, para a pagina publica
+        // desenhar a rota no mapa. Nao expoe nenhum dado sensivel (regra 14).
+        String geometry,
+
         String passengerFirstName,
 
         String driverFirstName,

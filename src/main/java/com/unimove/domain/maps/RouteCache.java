@@ -35,6 +35,10 @@ class RouteCache {
     @Column(name = "tempo_min", nullable = false)
     private int tempoMin;
 
+    /** Polyline codificada (precisao 5) do trajeto. Nullable para hits antigos. */
+    @Column(name = "geometry", columnDefinition = "TEXT")
+    private String geometry;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 

@@ -9,6 +9,7 @@ import com.unimove.domain.ride.dto.RatingResponse;
 import com.unimove.domain.ride.dto.RideHistoryItem;
 import com.unimove.domain.ride.dto.RideMuralItem;
 import com.unimove.domain.ride.dto.RideResponse;
+import com.unimove.domain.ride.dto.RideRouteResponse;
 import com.unimove.domain.ride.dto.SubmitRatingRequest;
 import com.unimove.domain.ride.dto.UpdateDriverLocationRequest;
 import com.unimove.shared.security.AuthenticatedUser;
@@ -123,6 +124,13 @@ public class RideController {
     public RideResponse get(@AuthenticationPrincipal AuthenticatedUser user,
                             @PathVariable UUID id) {
         return rideService.get(user, id);
+    }
+
+    @GetMapping("/{id}/route")
+    @PreAuthorize("hasAnyRole('PASSAGEIRO', 'MOTORISTA')")
+    public RideRouteResponse route(@AuthenticationPrincipal AuthenticatedUser user,
+                                   @PathVariable UUID id) {
+        return rideService.getRoute(user, id);
     }
 
     @GetMapping(value = "/{id}/status-stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)

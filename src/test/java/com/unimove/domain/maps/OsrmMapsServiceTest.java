@@ -1,6 +1,7 @@
 package com.unimove.domain.maps;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -43,6 +44,7 @@ class OsrmMapsServiceTest {
         cached.setRouteHash(RouteHasher.hash(LAT_O, LNG_O, LAT_D, LNG_D));
         cached.setDistanciaKm(new BigDecimal("2.500"));
         cached.setTempoMin(7);
+        cached.setGeometry("poly_cached");
         when(repo.findByRouteHash(cached.getRouteHash())).thenReturn(Optional.of(cached));
 
         OsrmMapsService service = new OsrmMapsService(client, repo);
@@ -50,15 +52,42 @@ class OsrmMapsServiceTest {
 
         assertThat(info.distanciaKm()).isEqualByComparingTo("2.500");
         assertThat(info.tempoMin()).isEqualTo(7);
+        assertThat(info.geometry()).isEqualTo("poly_cached");
         assertThat(osrmCalls.get()).isZero();
         verify(repo, never()).save(any());
+    }
+
+    @Test
+    void cacheHitSemGeometriaRebuscaNoOsrmEFazBackfill() {
+        AtomicInteger osrmCalls = new AtomicInteger(0);
+        WebClient client = webClientReturning(osrmCalls, """
+                {"routes":[{"distance":2500,"duration":420,"geometry":"poly_backfill"}]}
+                """);
+
+        // Entrada antiga do cache, criada antes da feature: sem geometria.
+        RouteCacheRepository repo = mock(RouteCacheRepository.class);
+        RouteCache stale = new RouteCache();
+        stale.setRouteHash(RouteHasher.hash(LAT_O, LNG_O, LAT_D, LNG_D));
+        stale.setDistanciaKm(new BigDecimal("2.500"));
+        stale.setTempoMin(7);
+        stale.setGeometry(null);
+        when(repo.findByRouteHash(stale.getRouteHash())).thenReturn(Optional.of(stale));
+
+        OsrmMapsService service = new OsrmMapsService(client, repo);
+        RouteInfo info = service.route(LAT_O, LNG_O, LAT_D, LNG_D);
+
+        assertThat(info.geometry()).isEqualTo("poly_backfill");
+        assertThat(osrmCalls.get()).isEqualTo(1);
+        // Faz UPDATE na propria entrada (mesmo objeto), completando a geometria.
+        verify(repo, times(1)).save(stale);
+        assertThat(stale.getGeometry()).isEqualTo("poly_backfill");
     }
 
     @Test
     void cacheMissChamaOsrmEConverteUnidadesEPersiste() {
         AtomicInteger osrmCalls = new AtomicInteger(0);
         WebClient client = webClientReturning(osrmCalls, """
-                {"routes":[{"distance":3500,"duration":420}]}
+                {"routes":[{"distance":3500,"duration":420,"geometry":"poly_fetched"}]}
                 """);
 
         RouteCacheRepository repo = mock(RouteCacheRepository.class);
@@ -70,8 +99,13 @@ class OsrmMapsServiceTest {
         // 3500m = 3.500km; 420s = 7min
         assertThat(info.distanciaKm()).isEqualByComparingTo("3.500");
         assertThat(info.tempoMin()).isEqualTo(7);
+        assertThat(info.geometry()).isEqualTo("poly_fetched");
         assertThat(osrmCalls.get()).isEqualTo(1);
-        verify(repo, times(1)).save(any(RouteCache.class));
+
+        // A geometria entra no cache junto com distancia/tempo.
+        ArgumentCaptor<RouteCache> persisted = ArgumentCaptor.forClass(RouteCache.class);
+        verify(repo, times(1)).save(persisted.capture());
+        assertThat(persisted.getValue().getGeometry()).isEqualTo("poly_fetched");
     }
 
     @Test

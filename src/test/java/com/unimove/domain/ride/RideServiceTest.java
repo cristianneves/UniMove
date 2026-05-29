@@ -103,7 +103,7 @@ class RideServiceTest {
     @DisplayName("create: preço vem do OSRM + PricingPolicy, não do request")
     void createComputesPriceFromOsrmNotFromRequest() {
         when(mapsService.route(anyList()))
-                .thenReturn(new RouteInfo(new BigDecimal("5.000"), 12));
+                .thenReturn(new RouteInfo(new BigDecimal("5.000"), 12, "poly_5km"));
         when(pricingPolicy.calculate(any(BigDecimal.class), eq(12), any(RideCategory.class), anyString()))
                 .thenReturn(new BigDecimal("18.40"));
         when(rideRepository.save(any(Ride.class))).thenAnswer(inv -> {
@@ -123,13 +123,14 @@ class RideServiceTest {
         verify(rideRepository).save(saved.capture());
         assertThat(saved.getValue().getDistanciaKm()).isEqualByComparingTo("5.000");
         assertThat(saved.getValue().getTempoMin()).isEqualTo(12);
+        assertThat(saved.getValue().getRouteGeometry()).isEqualTo("poly_5km");
     }
 
     @Test
     @DisplayName("create com paradas: persiste stops e roteia por todos os waypoints")
     void createWithStopsPersistsStopsAndRoutesThroughThem() {
         when(mapsService.route(anyList()))
-                .thenReturn(new RouteInfo(new BigDecimal("8.000"), 20));
+                .thenReturn(new RouteInfo(new BigDecimal("8.000"), 20, "poly_8km"));
         when(pricingPolicy.calculate(any(BigDecimal.class), eq(20), any(RideCategory.class), anyString()))
                 .thenReturn(new BigDecimal("30.00"));
         when(rideRepository.save(any(Ride.class))).thenAnswer(inv -> {
@@ -170,7 +171,7 @@ class RideServiceTest {
     @DisplayName("estimate: usa OSRM + PricingPolicy e NÃO persiste ride")
     void estimateReturnsPriceWithoutPersisting() {
         when(mapsService.route(anyList()))
-                .thenReturn(new RouteInfo(new BigDecimal("3.500"), 9));
+                .thenReturn(new RouteInfo(new BigDecimal("3.500"), 9, "poly_estimate"));
         when(pricingPolicy.calculate(any(BigDecimal.class), eq(9), any(RideCategory.class), anyString()))
                 .thenReturn(new BigDecimal("14.65"));
 
@@ -184,6 +185,7 @@ class RideServiceTest {
         assertThat(resp.distanciaKm()).isEqualByComparingTo("3.500");
         assertThat(resp.tempoMin()).isEqualTo(9);
         assertThat(resp.preco()).isEqualByComparingTo("14.65");
+        assertThat(resp.geometry()).isEqualTo("poly_estimate");
         verify(rideRepository, never()).save(any(Ride.class));
     }
 

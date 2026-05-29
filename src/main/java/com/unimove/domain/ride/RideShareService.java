@@ -60,6 +60,7 @@ public class RideShareService {
                 ride.getLatDestino(),
                 ride.getLngDestino(),
                 stops,
+                ride.getRouteGeometry(),
                 passenger.firstName(),
                 driver == null ? null : driver.firstName(),
                 driver == null ? null : driver.vehiclePlate(),
