@@ -33,17 +33,32 @@ public record CreateRideRequest(
 
         RideCategory category,
 
+        // Texto do endereco (opcional) resolvido pelo app via geocoding — persistido
+        // para alimentar os destinos recentes (estilo Uber). Coordenadas continuam
+        // sendo a fonte de verdade da rota/preco.
+        @Size(max = 200)
+        String origemEndereco,
+
+        @Size(max = 200)
+        String destinoEndereco,
+
         @Valid
         @Size(max = 5, message = "Maximo de 5 paradas intermediarias.")
         List<StopPoint> stops
 ) {
     public CreateRideRequest(BigDecimal latOrigem, BigDecimal lngOrigem,
                              BigDecimal latDestino, BigDecimal lngDestino) {
-        this(latOrigem, lngOrigem, latDestino, lngDestino, null, null);
+        this(latOrigem, lngOrigem, latDestino, lngDestino, null, null, null, null);
     }
 
     public CreateRideRequest(BigDecimal latOrigem, BigDecimal lngOrigem,
                              BigDecimal latDestino, BigDecimal lngDestino, RideCategory category) {
-        this(latOrigem, lngOrigem, latDestino, lngDestino, category, null);
+        this(latOrigem, lngOrigem, latDestino, lngDestino, category, null, null, null);
+    }
+
+    public CreateRideRequest(BigDecimal latOrigem, BigDecimal lngOrigem,
+                             BigDecimal latDestino, BigDecimal lngDestino,
+                             RideCategory category, List<StopPoint> stops) {
+        this(latOrigem, lngOrigem, latDestino, lngDestino, category, null, null, stops);
     }
 }

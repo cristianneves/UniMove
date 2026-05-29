@@ -17,6 +17,7 @@ import com.unimove.domain.ride.dto.EarningsResponse;
 import com.unimove.domain.ride.dto.EstimateRequest;
 import com.unimove.domain.ride.dto.EstimateResponse;
 import com.unimove.domain.ride.dto.RatingResponse;
+import com.unimove.domain.ride.dto.RecentDestinationResponse;
 import com.unimove.domain.ride.dto.RideHistoryItem;
 import com.unimove.domain.ride.dto.RideMuralItem;
 import com.unimove.domain.ride.dto.RideResponse;
@@ -57,6 +58,9 @@ import java.util.UUID;
 public class RideService {
 
     private static final Logger log = LoggerFactory.getLogger(RideService.class);
+
+    /** Teto de itens na lista de destinos recentes (tela "para onde vamos?"). */
+    private static final int MAX_RECENT_DESTINATIONS = 20;
 
     private final RideRepository rideRepository;
     private final RideRatingRepository rideRatingRepository;
@@ -133,6 +137,8 @@ public class RideService {
         ride.setLngOrigem(req.lngOrigem());
         ride.setLatDestino(req.latDestino());
         ride.setLngDestino(req.lngDestino());
+        ride.setOrigemEndereco(trimToNull(req.origemEndereco()));
+        ride.setDestinoEndereco(trimToNull(req.destinoEndereco()));
         if (req.stops() != null) {
             for (StopPoint s : req.stops()) {
                 ride.getStops().add(new RideStop(s.lat(), s.lng()));
@@ -500,6 +506,20 @@ public class RideService {
     }
 
     /**
+     * Destinos recentes do passageiro para a tela "para onde vamos?" (estilo Uber).
+     * Derivado do historico — endereco textual + coordenadas, dedup por coordenada
+     * arredondada (regra 11) e ordenado por recencia. O limite e saneado em [1, MAX].
+     */
+    @Transactional(readOnly = true)
+    public List<RecentDestinationResponse> recentDestinations(AuthenticatedUser passageiro, int limit) {
+        int safe = Math.max(1, Math.min(limit, MAX_RECENT_DESTINATIONS));
+        return rideRepository.findRecentDestinations(passageiro.userId(), safe).stream()
+                .map(r -> new RecentDestinationResponse(
+                        r.getAddress(), r.getLat(), r.getLng(), r.getLastUsedAt()))
+                .toList();
+    }
+
+    /**
      * IDs de corridas elegiveis a expiracao (em AVAILABLE_IN_MURAL ha mais que o TTL).
      * Chamado pelo {@code RideExpirationScheduler}.
      */
@@ -567,6 +587,15 @@ public class RideService {
         } else {
             emit.run();
         }
+    }
+
+    /** Normaliza texto opcional: trim e converte vazio/blank em null. */
+    private static String trimToNull(String s) {
+        if (s == null) {
+            return null;
+        }
+        String t = s.trim();
+        return t.isEmpty() ? null : t;
     }
 
     private Ride loadAsAcceptingDriver(AuthenticatedUser motorista, UUID rideId) {
