@@ -5,8 +5,10 @@ import com.unimove.domain.maps.GeoPoint;
 import com.unimove.domain.maps.MapsService;
 import com.unimove.domain.maps.RouteInfo;
 import com.unimove.domain.payment.PaymentService;
+import com.unimove.domain.ride.dto.AcceptRideRequest;
 import com.unimove.domain.ride.dto.AdminRideItem;
 import com.unimove.domain.ride.dto.CancelRideRequest;
+import com.unimove.domain.ride.dto.CategoryOption;
 import com.unimove.domain.ride.dto.ConfirmPaymentRequest;
 import com.unimove.domain.ride.dto.CreateRideRequest;
 import com.unimove.domain.ride.dto.EarningsAggregate;
@@ -96,10 +98,21 @@ public class RideService {
     public EstimateResponse estimate(AuthenticatedUser passageiro, EstimateRequest req) {
         RouteInfo route = mapsService.route(buildWaypoints(
                 req.latOrigem(), req.lngOrigem(), req.latDestino(), req.lngDestino(), req.stops()));
+
+        // Mesma rota (uma chamada ao OSRM) precificada em cada categoria — tela
+        // "escolha sua corrida". So o preco varia entre as opcoes.
+        List<CategoryOption> options = new ArrayList<>();
+        for (RideCategory c : RideCategory.values()) {
+            options.add(new CategoryOption(c, pricingPolicy.calculate(
+                    route.distanciaKm(), route.tempoMin(), c, passageiro.cidade())));
+        }
+
+        // preco mantido por compatibilidade: categoria pedida (ou CARRO default).
         RideCategory category = req.category() != null ? req.category() : RideCategory.CARRO;
         BigDecimal preco = pricingPolicy.calculate(
                 route.distanciaKm(), route.tempoMin(), category, passageiro.cidade());
-        return new EstimateResponse(route.distanciaKm(), route.tempoMin(), preco, route.geometry());
+
+        return new EstimateResponse(route.distanciaKm(), route.tempoMin(), preco, route.geometry(), options);
     }
 
     @Transactional
@@ -188,8 +201,14 @@ public class RideService {
         return rideRepository.findMural(motorista.cidade(), RideCategory.fromVehicleType(vt));
     }
 
+    /** Aceite sem compartilhar localizacao — ETA de chegada na origem fica nulo. */
     @Transactional
     public RideResponse accept(AuthenticatedUser motorista, UUID rideId) {
+        return accept(motorista, rideId, null);
+    }
+
+    @Transactional
+    public RideResponse accept(AuthenticatedUser motorista, UUID rideId, AcceptRideRequest req) {
         userAccountService.requireActive(motorista.userId());
         driverService.assertCanAcceptRides(motorista.userId());
 
@@ -210,11 +229,45 @@ public class RideService {
 
         ride.setMotoristaId(motorista.userId());
         ride.setStatus(RideStatus.DRIVER_EN_ROUTE);
-        ride.setAcceptedAt(Instant.now());
+        Instant now = Instant.now();
+        ride.setAcceptedAt(now);
 
-        log.info("Ride {} aceita pelo motorista {}", ride.getId(), motorista.userId());
+        // Se o app mandou a posicao do motorista, semeia a localizacao (o
+        // passageiro ve posicao + distancia logo no aceite) e calcula UMA vez o
+        // ETA de chegada na origem via OSRM. Best-effort: falha de mapa nao pode
+        // impedir o aceite — regra 21 / regra 10 (OSRM nunca no polling).
+        if (req != null) {
+            ride.setDriverCurrentLat(req.lat());
+            ride.setDriverCurrentLng(req.lng());
+            ride.setDriverLocationUpdatedAt(now);
+            computePickupEtaMin(req.lat(), req.lng(), ride).ifPresent(eta -> {
+                ride.setPickupEtaMin(eta);
+                ride.setPickupEtaAt(now);
+            });
+        }
+
+        log.info("Ride {} aceita pelo motorista {} (pickupEtaMin={})",
+                ride.getId(), motorista.userId(), ride.getPickupEtaMin());
         publishStatus(ride);
-        return RideResponse.from(ride);
+        return RideResponse.from(ride, computeDriverDistanceKm(ride));
+    }
+
+    /**
+     * ETA de carro (minutos) do motorista ate a origem, UMA chamada ao OSRM no
+     * aceite. Best-effort: se o gateway de mapas falhar, retorna vazio e o aceite
+     * segue sem ETA (o passageiro cai no fallback de distancia haversine).
+     */
+    private java.util.Optional<Integer> computePickupEtaMin(BigDecimal driverLat, BigDecimal driverLng, Ride ride) {
+        try {
+            RouteInfo toPickup = mapsService.route(
+                    driverLat.doubleValue(), driverLng.doubleValue(),
+                    ride.getLatOrigem().doubleValue(), ride.getLngOrigem().doubleValue());
+            return java.util.Optional.of(toPickup.tempoMin());
+        } catch (RuntimeException e) {
+            log.warn("Falha ao calcular ETA de chegada da ride {} (segue sem ETA): {}",
+                    ride.getId(), e.toString());
+            return java.util.Optional.empty();
+        }
     }
 
     @Transactional

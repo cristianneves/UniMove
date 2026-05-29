@@ -111,6 +111,17 @@ public class Ride {
     @Column(name = "driver_location_updated_at")
     private Instant driverLocationUpdatedAt;
 
+    /**
+     * ETA (minutos) do motorista ate a origem, calculado UMA vez no aceite via
+     * OSRM quando o app envia a posicao (regra 21). Estatico — fica gravado e
+     * sai no polling sem custo de mapa. Nulo se o aceite veio sem localizacao.
+     */
+    @Column(name = "pickup_eta_min")
+    private Integer pickupEtaMin;
+
+    @Column(name = "pickup_eta_at")
+    private Instant pickupEtaAt;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 

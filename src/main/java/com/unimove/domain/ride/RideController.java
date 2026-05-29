@@ -1,5 +1,6 @@
 package com.unimove.domain.ride;
 
+import com.unimove.domain.ride.dto.AcceptRideRequest;
 import com.unimove.domain.ride.dto.CancelRideRequest;
 import com.unimove.domain.ride.dto.ConfirmPaymentRequest;
 import com.unimove.domain.ride.dto.CreateRideRequest;
@@ -85,8 +86,9 @@ public class RideController {
     @PostMapping("/{id}/accept")
     @PreAuthorize("hasRole('MOTORISTA')")
     public RideResponse accept(@AuthenticationPrincipal AuthenticatedUser user,
-                               @PathVariable UUID id) {
-        return rideService.accept(user, id);
+                               @PathVariable UUID id,
+                               @Valid @RequestBody(required = false) AcceptRideRequest req) {
+        return rideService.accept(user, id, req);
     }
 
     @PostMapping("/{id}/start")
