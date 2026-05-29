@@ -3,9 +3,12 @@ package com.unimove.domain.ride;
 import com.unimove.domain.chat.ChatSseHub;
 import com.unimove.domain.maps.GeoPoint;
 import com.unimove.domain.maps.MapsService;
+import com.unimove.domain.maps.MapsUnavailableException;
 import com.unimove.domain.maps.RouteInfo;
 import com.unimove.domain.payment.PaymentService;
+import com.unimove.domain.ride.dto.AcceptRideRequest;
 import com.unimove.domain.ride.dto.CancelRideRequest;
+import com.unimove.domain.ride.dto.CategoryOption;
 import com.unimove.domain.ride.dto.ConfirmPaymentRequest;
 import com.unimove.domain.ride.dto.CreateRideRequest;
 import com.unimove.domain.ride.dto.EstimateRequest;
@@ -42,6 +45,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -189,6 +193,31 @@ class RideServiceTest {
         verify(rideRepository, never()).save(any(Ride.class));
     }
 
+    @Test
+    @DisplayName("estimate: uma rota, precos por categoria em options (escolha sua corrida)")
+    void estimateReturnsAllCategoryOptions() {
+        when(mapsService.route(anyList()))
+                .thenReturn(new RouteInfo(new BigDecimal("4.000"), 10, "poly_multi"));
+        when(pricingPolicy.calculate(any(BigDecimal.class), eq(10), eq(RideCategory.MOTO), anyString()))
+                .thenReturn(new BigDecimal("9.50"));
+        when(pricingPolicy.calculate(any(BigDecimal.class), eq(10), eq(RideCategory.CARRO), anyString()))
+                .thenReturn(new BigDecimal("16.30"));
+
+        EstimateResponse resp = rideService.estimate(pax, new EstimateRequest(
+                new BigDecimal("-20.82000"), new BigDecimal("-49.38000"),
+                new BigDecimal("-20.83000"), new BigDecimal("-49.39000")));
+
+        // mesma rota para todas as opcoes; OSRM chamado uma unica vez
+        verify(mapsService).route(anyList());
+        assertThat(resp.options())
+                .extracting(CategoryOption::category, CategoryOption::preco)
+                .containsExactlyInAnyOrder(
+                        org.assertj.core.groups.Tuple.tuple(RideCategory.MOTO, new BigDecimal("9.50")),
+                        org.assertj.core.groups.Tuple.tuple(RideCategory.CARRO, new BigDecimal("16.30")));
+        // preco de compatibilidade = categoria default (CARRO)
+        assertThat(resp.preco()).isEqualByComparingTo("16.30");
+    }
+
     // ------------------------------------------------------------------------
     // confirmPayment()
     // ------------------------------------------------------------------------
@@ -281,6 +310,40 @@ class RideServiceTest {
 
         assertThatThrownBy(() -> rideService.accept(mot, ride.getId()))
                 .isInstanceOf(IllegalRideTransitionException.class);
+    }
+
+    @Test
+    @DisplayName("accept com localizacao: calcula ETA via OSRM e semeia posicao do motorista")
+    void acceptWithLocationComputesPickupEta() {
+        Ride ride = rideAvailable(pax.userId(), CIDADE);
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+        when(mapsService.route(anyDouble(), anyDouble(), anyDouble(), anyDouble()))
+                .thenReturn(new RouteInfo(new BigDecimal("2.100"), 7, "poly_pickup"));
+
+        AcceptRideRequest body = new AcceptRideRequest(
+                new BigDecimal("-20.81000"), new BigDecimal("-49.37000"));
+        RideResponse resp = rideService.accept(mot, ride.getId(), body);
+
+        assertThat(resp.status()).isEqualTo(RideStatus.DRIVER_EN_ROUTE);
+        assertThat(resp.pickupEtaMin()).isEqualTo(7);
+        assertThat(resp.driverCurrentLat()).isEqualByComparingTo(body.lat());
+        assertThat(resp.driverDistanceKm()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("accept com localizacao mas OSRM fora: aceita sem ETA (best-effort)")
+    void acceptWithLocationStillSucceedsWhenOsrmFails() {
+        Ride ride = rideAvailable(pax.userId(), CIDADE);
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+        when(mapsService.route(anyDouble(), anyDouble(), anyDouble(), anyDouble()))
+                .thenThrow(new MapsUnavailableException("OSRM fora"));
+
+        RideResponse resp = rideService.accept(mot, ride.getId(), new AcceptRideRequest(
+                new BigDecimal("-20.81000"), new BigDecimal("-49.37000")));
+
+        assertThat(resp.status()).isEqualTo(RideStatus.DRIVER_EN_ROUTE);
+        assertThat(resp.pickupEtaMin()).isNull();
+        assertThat(resp.driverCurrentLat()).isNotNull();
     }
 
     // ------------------------------------------------------------------------
