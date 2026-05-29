@@ -1,159 +1,261 @@
-# Plano — Mapa "estilo Uber" (grátis, sem turn-by-turn) — MVP
+# Guia de Integração — Mapa "estilo Uber" no app (dev mobile + agente de IA)
 
-> **Status:** ✅ Backend implementado (branch `feature/mapa-geometria-rota`, migration
-> `V13`, regra 19 no CLAUDE.md). Falta apenas a parte do app Flutter (seção 4), que é
-> fora deste repositório. Resumo do que entrou no backend na seção 5.
-
-> Objetivo: deixar o app **visualmente parecido com Uber/99** — mapa com a rota
-> desenhada, marcadores de origem/destino/paradas e o pin do motorista se movendo —
-> **sem custo de licença** e **sem navegação curva-a-curva** (fora do escopo do MVP,
-> ver CLAUDE.md). Reaproveita o que já existe: OSRM, `route_cache`, polling da
-> localização (regra 10) e SSE de status (regra 18).
-
----
-
-## 1. O que é frontend e o que é backend
-
-O "mapa" são 3 camadas. Só uma é paga nos apps reais — e é a que **não** vamos fazer.
-
-| Camada | Onde vive | Solução grátis | Status no MVP |
-|--------|-----------|----------------|---------------|
-| **1. Render + tiles** (desenhar o mapa) | **Flutter** | `flutter_map` + tiles OpenStreetMap | App (fora deste repo) |
-| **2. Routing** (rota A→B, dist, tempo, **geometria**) | **Backend** | OSRM (já temos) | ⚠️ falta expor a geometria |
-| **3. Navegação turn-by-turn** (voz, "vire à direita") | SDK pago (Google/Mapbox) | — | ❌ fora de escopo |
-
-**Conclusão:** o backend só precisa de **uma adição**: começar a devolver a **geometria
-da rota** (a linha que o app desenha). Hoje o OSRM é chamado com `overview=false`
-(`OsrmMapsService.java:68`) e o `RouteInfo` só tem `distanciaKm` + `tempoMin` —
-nenhuma geometria sai do backend.
-
-O movimento do pin do motorista **já funciona**: `driver_current_lat/lng` via polling
-(regra 10) + `RideResponse.driverDistanceKm`. O SSE de status (regra 18) já cobre as
-transições. Nada disso muda.
+> **Para quem é este documento:** o desenvolvedor do app Flutter da UniMove e o
+> agente de IA que o auxilia. Ele descreve **como consumir o backend** para
+> renderizar o mapa com a rota desenhada, marcadores e o pin do motorista se
+> movendo — tudo **grátis** e **sem navegação turn-by-turn** (fora do escopo do MVP).
+>
+> **Status do backend:** ✅ pronto (branch `feature/mapa-geometria-rota`, migration
+> `V13`, regra 19 do `CLAUDE.md`). Todos os endpoints abaixo já existem e estão
+> testados. Nada mais precisa mudar no servidor para o app desenhar o mapa.
 
 ---
 
-## 2. Decisão de design — geometria é estática, não pode entrar no polling
+## 1. Visão geral — divisão de responsabilidades
 
-A geometria de uma rota **não muda** durante a corrida (origem/paradas/destino são
-fixos). Logo:
+O "mapa" são 3 camadas. O backend cobre a 2; o app cobre a 1; a 3 não existe no MVP.
 
-- ❌ **NÃO** incluir o polyline no `RideResponse` — ele é devolvido a cada poll de 5s
-  (`GET /rides/{id}`) e a regra 3 exige polling leve. Um polyline urbano tem alguns KB;
-  multiplicar isso por um poll a cada 5s é desperdício puro.
-- ✅ O front busca a geometria **uma única vez** (ao abrir/aceitar a corrida), guarda em
-  memória e segue só com o polling leve para status + posição do motorista.
+| Camada | Onde vive | Como |
+|--------|-----------|------|
+| **1. Render + tiles** (desenhar o mapa, marcadores, linha) | **App Flutter** | `flutter_map` + tiles OpenStreetMap |
+| **2. Routing** (rota, distância, tempo, **geometria/polyline**) | **Backend** | OSRM — já exposto via API |
+| **3. Navegação turn-by-turn** (voz, "vire à direita") | ❌ não existe | fora de escopo (camada paga dos apps reais) |
 
-Por isso a geometria sai por **endpoints de uso único**, não pelo polling.
+**O que o backend entrega para o mapa:**
+- A **polyline** (linha do trajeto) — o app decodifica e desenha por cima dos tiles.
+- As **coordenadas** de origem, destino e paradas — viram marcadores.
+- A **posição do motorista** (atualizada via polling) + distância em linha reta — vira o pin que se move.
+- As **transições de estado** em tempo quase real (SSE) — para a UI reagir (aceitou, chegou, iniciou, finalizou).
+
+**O que o app faz:** desenha os tiles, decodifica a polyline, posiciona os marcadores
+e move o pin. Nenhum cálculo de rota/preço no app (regra 2 do backend).
 
 ---
 
-## 3. Mudanças no backend (passo a passo)
+## 2. Autenticação (vale para todos os endpoints, exceto `/share`)
 
-### Passo 1 — OSRM passa a trazer a geometria
-`OsrmMapsService.fetchFromOsrm` (`OsrmMapsService.java:56`):
-- Trocar `queryParam("overview", "false")` por `overview=full` + `geometries=polyline`.
-- `polyline` (Encoded Polyline Algorithm, precisão 5) é compacto e tem decoder pronto
-  no Flutter (`flutter_polyline_points`). Evitar `geojson` (verboso).
-- Adicionar `String geometry` ao record `OsrmRoute` e ler `first.geometry()` no `parse`.
+Todas as chamadas autenticadas vão com o JWT no header:
 
-### Passo 2 — `RouteInfo` carrega a geometria
-`RouteInfo.java`:
-```java
-public record RouteInfo(BigDecimal distanciaKm, int tempoMin, String geometry) {}
 ```
-Ajustar os 2 construtores/usos no `OsrmMapsService` e os mocks em
-`OsrmMapsServiceTest` / `RideServiceTest`.
-
-### Passo 3 — `route_cache` guarda a geometria (migration V13)
-A geometria é cara de buscar e nunca muda → cacheia junto (respeita a regra 11).
-`V13__route_cache_geometry.sql`:
-```sql
-ALTER TABLE route_cache ADD COLUMN geometry TEXT;
+Authorization: Bearer <access_token>
 ```
-- Nullable: linhas antigas do cache não têm geometria. No `route()`, se houver hit de
-  cache **sem** geometria, tratar como miss parcial (rebuscar no OSRM e dar `UPDATE`),
-  ou simplesmente aceitar null e o front cai num fallback (linha reta). Recomendo
-  rebuscar+update — uma vez só por rota.
-- Adicionar `geometry` em `RouteCache.java` + `setGeometry`/`getGeometry` no `persist`.
 
-### Passo 4 — guardar a geometria na `Ride` (migration V13, mesma)
-Para o front não depender do `route_cache` nem refazer hash:
-```sql
-ALTER TABLE rides ADD COLUMN route_geometry TEXT;
+O token vem de `POST /auth/login`. É stateless, validade 24h, sem refresh no MVP.
+Em 401, redirecionar para login. O endpoint `GET /share/{token}` é **público** (não
+manda Authorization).
+
+**Convenções de payload:**
+- Coordenadas e valores monetários são **números decimais** (no JSON chegam como número/string decimal). No app, parsear com cuidado (use `num`/`Decimal`, não arredonde lat/lng).
+- Timestamps são **ISO-8601 UTC** (ex: `2026-05-28T18:30:00Z`).
+- `category`: `CARRO` ou `MOTO`. `paymentMethod`: `PIX` ou `DINHEIRO`.
+- `status` da corrida: `PENDING_PAYMENT`, `AVAILABLE_IN_MURAL`, `DRIVER_EN_ROUTE`, `IN_PROGRESS`, `COMPLETED`, `CANCELLED`, `EXPIRED`.
+
+---
+
+## 3. A peça-chave do mapa: a polyline
+
+A linha da rota é uma **polyline codificada** (Encoded Polyline Algorithm, **precisão 5**
+— o padrão do Google/OSRM). No Flutter, decodifique com `flutter_polyline_points`:
+
+```dart
+import 'package:flutter_polyline_points/flutter_polyline_points.dart';
+
+List<LatLng> decodeRoute(String encoded) {
+  final result = PolylinePoints().decodePolyline(encoded); // precisão 5 (default)
+  return result.map((p) => LatLng(p.latitude, p.longitude)).toList();
+}
 ```
-- `Ride.java`: campo `routeGeometry` (coluna `route_geometry`).
-- `RideService.create` (`RideService.java:96-127`): ao calcular a rota, gravar
-  `ride.setRouteGeometry(route.geometry())`.
-- **LAZY-friendly:** é só uma coluna `TEXT` na própria `rides`; como NÃO entra nas
-  projeções DTO do mural/histórico (regra 3), não pesa nos polls.
 
-### Passo 5 — geometria no preview (`EstimateResponse`)
-`POST /rides/estimate` é chamado **uma vez** antes de criar a corrida → ideal para
-desenhar a rota na tela de confirmação ("igual Uber"). Adicionar `String geometry` ao
-`EstimateResponse` e preencher com `route.geometry()` em `RideService` (`:101`).
+> ⚠️ A polyline pode vir **`null`** em corridas criadas antes desta feature (V13).
+> Sempre trate o `null` com um **fallback de linha reta** entre origem e destino
+> (`Polyline(points: [origem, destino])`). Corridas novas sempre têm geometria.
 
-### Passo 6 — endpoint leve para a geometria da corrida criada
-`GET /rides/{id}/route` → `{ "geometry": "<polyline>" }`.
-- Acesso: passageiro dono / motorista aceitante (`RideService.assertParticipant`, já
-  usado pelo SSE — regra 18).
-- Lê `ride.routeGeometry` direto (sem OSRM, sem cache lookup). Front chama **uma vez**
-  ao abrir a corrida.
-- Adicionar a rota na tabela de Roles do CLAUDE.md.
-
-### Passo 7 (opcional) — geometria no compartilhamento público
-`SharedRideResponse` (regra 14): incluir `geometry` para a página `/share/{token}`
-desenhar a rota também. Mantém a regra de **não expor dados sensíveis** (geometria é só
-a linha do trajeto). Em estado final segue 410 GONE.
+A geometria é **estática** durante a corrida (origem/paradas/destino não mudam).
+**Busque uma vez e guarde** — não rebusque a cada poll.
 
 ---
 
-## 4. Frontend (fora deste repo — guia para o app Flutter)
+## 4. Endpoints que o app usa para o mapa
 
-| Item | Pacote sugerido | Custo |
-|------|-----------------|-------|
-| Mapa + tiles | `flutter_map` (tiles OSM) | Grátis |
-| Decodificar polyline | `flutter_polyline_points` | Grátis |
-| Marcadores | nativo do `flutter_map` | Grátis |
+### 4.1 `POST /rides/estimate` — preview da rota antes de criar (role `PASSAGEIRO`)
+Use na tela de "confirmar corrida" para já desenhar a rota e mostrar preço/tempo.
 
-Fluxo no app:
-1. Tela de estimativa → desenha rota com `EstimateResponse.geometry`.
-2. Corrida criada/aceita → 1 chamada a `GET /rides/{id}/route`, guarda o polyline.
-3. Loop normal: polling `GET /rides/{id}` (status + `driverCurrentLat/Lng`) e/ou SSE
-   (regra 18) movem o **pin do motorista**. A linha da rota não é rebuscada.
+**Request:**
+```json
+{
+  "latOrigem": -20.81972, "lngOrigem": -49.37944,
+  "latDestino": -20.79500, "lngDestino": -49.36000,
+  "category": "CARRO",
+  "stops": [ { "lat": -20.80500, "lng": -49.37000 } ]
+}
+```
+`category` e `stops` são opcionais (`stops` máx. 5).
 
-⚠️ **Política de tiles OSM:** o tile server público do OpenStreetMap tem
-[usage policy](https://operations.osmfoundation.org/policies/tiles/) e não serve apps em
-produção/escala. Para o MVP/testes serve; ao crescer, usar um provedor com free tier
-generoso (MapTiler/Stadia/Protomaps) ou self-host de tiles — **decisão do front, não
-afeta o backend**.
+**Response (`EstimateResponse`):**
+```json
+{ "distanciaKm": 5.0, "tempoMin": 12, "preco": 18.40, "geometry": "}_p~F~ps|U..." }
+```
+→ Decodifique `geometry` e desenhe a rota. Mostre `preco`/`tempoMin`.
+
+### 4.2 `POST /rides` — cria a corrida (role `PASSAGEIRO`)
+Mesmo body do estimate. Retorna `RideResponse` (status inicial `PENDING_PAYMENT`).
+Em seguida o passageiro confirma o pagamento:
+
+`POST /rides/{id}/confirm-payment` → body `{ "method": "PIX" }` ou `{ "method": "DINHEIRO" }`
+→ status vai para `AVAILABLE_IN_MURAL`.
+
+### 4.3 `GET /rides/{id}/route` — a polyline da corrida criada ⭐ (role participante)
+**É o endpoint dedicado ao mapa.** Chame **uma única vez** ao abrir a tela da corrida
+(passageiro ou motorista). Leve e cacheável no app.
+
+**Response (`RideRouteResponse`):**
+```json
+{ "geometry": "}_p~F~ps|U..." }
+```
+→ Decodifique e desenhe a linha. Não chame de novo durante a corrida.
+
+Acesso: passageiro dono ou motorista aceitante; qualquer outro → 403.
+
+### 4.4 `GET /rides/{id}` — polling de estado + posição do motorista (role participante)
+**Chame a cada ~5s** enquanto a tela da corrida está aberta. É a **fonte de verdade**.
+**Não traz** a polyline de propósito (para o poll ser leve) — a linha você já pegou no 4.3.
+
+**Campos relevantes para o mapa (`RideResponse`):**
+```json
+{
+  "id": "...", "status": "DRIVER_EN_ROUTE",
+  "latOrigem": -20.81972, "lngOrigem": -49.37944,
+  "latDestino": -20.79500, "lngDestino": -49.36000,
+  "stops": [ { "lat": -20.80500, "lng": -49.37000 } ],
+  "driverCurrentLat": -20.81000, "driverCurrentLng": -49.37500,
+  "driverLocationUpdatedAt": "2026-05-28T18:31:10Z",
+  "driverDistanceKm": 1.2,
+  "category": "CARRO", "preco": 18.40,
+  "motoristaRatingAvg": 4.8, "motoristaRatingCount": 132
+}
+```
+→ Marcadores fixos: origem, destino, paradas. Pin móvel: `driverCurrentLat/Lng`
+(pode ser `null` antes do motorista enviar a 1ª posição). Texto "Motorista a
+`driverDistanceKm` km" (linha reta — Haversine; é estimativa, não GPS curva-a-curva).
+
+> **Semântica de `driverDistanceKm`:** em `DRIVER_EN_ROUTE` é a distância do motorista
+> até a **origem** (ele está vindo te buscar); em `IN_PROGRESS` é até o **destino final**.
+
+### 4.5 `GET /rides/{id}/status-stream` — transições em tempo real (SSE, role participante)
+Opcional, mas é o que dá a sensação "Uber" (reage na hora, sem esperar o poll de 5s).
+**Não substitui** o polling 4.4 — use os dois: SSE para reagir rápido a mudança de
+status, polling para a posição do motorista.
+
+- `Content-Type: text/event-stream`. Header `Authorization: Bearer` normalmente.
+- Ao conectar, o servidor manda **imediatamente um snapshot** do estado atual — então
+  reconexão é trivial (não precisa de `Last-Event-ID`).
+- Eventos:
+  - `event: status` → `data` é um `RideStatusEvent`:
+    ```json
+    { "rideId": "...", "status": "IN_PROGRESS", "at": "2026-05-28T18:35:00Z",
+      "terminal": false, "cancelledBy": null, "cancelReason": null }
+    ```
+  - `event: closed` (`data: "ride-ended"`) → vem **depois** de um status terminal
+    (`COMPLETED`/`CANCELLED`/`EXPIRED`); o servidor fecha a conexão em seguida. Não reconecte.
+  - Linhas de comentário `:ping` a cada 15s (heartbeat) — ignore.
+- Quando `terminal: true`, atualize a UI para o estado final e pare de fazer polling.
+
+Cliente sugerido no Flutter: pacote `sse_client` ou um `http` stream lendo linhas
+`event:`/`data:`. (O backend usa o mesmo padrão SSE do chat — regra 16.)
+
+### 4.6 `PUT /rides/{id}/driver-location` — **app do MOTORISTA** envia a posição
+Só no app do motorista, enquanto a corrida está em `DRIVER_EN_ROUTE` ou `IN_PROGRESS`.
+**Chame a cada ~10s** com o GPS do aparelho:
+```json
+{ "lat": -20.81000, "lng": -49.37500 }
+```
+É isso que faz o pin se mover no app do passageiro (via 4.4). O passageiro **não** chama este endpoint.
+
+### 4.7 `GET /share/{token}` — página pública de acompanhamento (sem auth)
+Para um terceiro (família) acompanhar pelo link do WhatsApp. Retorna `SharedRideResponse`
+com `geometry`, coordenadas, `stops`, nome/placa/rating do motorista e
+`driverCurrentLat/Lng` — **sem** dados sensíveis (id, telefone, preço, Pix).
+Em estado final responde **HTTP 410 GONE** (o link "expira" sozinho).
 
 ---
 
-## 5. Resumo das alterações no backend
+## 5. Como montar cada tela
 
-| Arquivo / artefato | Mudança |
-|--------------------|---------|
-| `OsrmMapsService.java` | `overview=full&geometries=polyline`; ler/persistir geometria |
-| `RouteInfo.java` | + campo `geometry` |
-| `RouteCache.java` | + campo `geometry` |
-| `Ride.java` | + campo `routeGeometry` |
-| `RideService.java` | gravar geometria no `create`; expor no estimate |
-| `EstimateResponse.java` | + campo `geometry` |
-| **Novo** `GET /rides/{id}/route` no `RideController` | devolve geometria leve |
-| `SharedRideResponse` (opcional) | + campo `geometry` |
-| **Migration** `V13__route_cache_geometry.sql` | `route_cache.geometry` + `rides.route_geometry` |
-| `OsrmMapsServiceTest`, `RideServiceTest` | ajustar mocks de `RouteInfo` |
-| `CLAUDE.md` | nova rota na tabela de Roles + nota na regra 11/2 |
+### App do PASSAGEIRO
+1. **Confirmar corrida:** `POST /rides/estimate` → desenha rota (`geometry`) + mostra preço/tempo.
+2. **Criar + pagar:** `POST /rides` → `POST /rides/{id}/confirm-payment`.
+3. **Acompanhar:** ao abrir a tela da corrida:
+   - 1× `GET /rides/{id}/route` → desenha a linha (guarda em memória).
+   - Abre o SSE `GET /rides/{id}/status-stream` → reage a mudanças de status.
+   - Polling `GET /rides/{id}` a cada 5s → move o pin do motorista + atualiza "a X km".
+   - Marcadores: origem, destino, paradas (de `latOrigem/...`, `stops`).
+4. **Fim:** evento `terminal` (ou status `COMPLETED`/`CANCELLED`) → fecha SSE, para o polling, vai pra tela de avaliação.
 
-**Custo total: R$ 0.** Nenhuma chave, nenhum SDK pago, nenhuma dependência nova no
-backend (Flutter ganha 2 pacotes grátis).
+### App do MOTORISTA
+- Mesma tela de mapa (passos do `route` + polling + SSE), **mais**:
+- A cada ~10s: `PUT /rides/{id}/driver-location` com o GPS → alimenta o pin do passageiro.
+- O motorista vê a própria rota desenhada e os marcadores; a navegação curva-a-curva
+  fica por conta de um app externo (Google Maps/Waze) se ele quiser — **não é a UniMove**.
 
 ---
 
-## 6. Fora deste plano (deixar claro)
+## 6. Pacotes Flutter sugeridos (todos grátis)
 
-- Turn-by-turn / navegação por voz → fora do escopo do MVP.
-- Recalcular rota em tempo real se o motorista desviar → não fazemos; a linha é o
-  trajeto orçamentário, igual à filosofia do `route_cache` (regra 11).
-- Mapa em tempo real curva-a-curva → continua via polling textual + pin (regra 4/10).
+| Item | Pacote | Observação |
+|------|--------|------------|
+| Mapa + tiles | `flutter_map` | tiles OSM no MVP |
+| Decodificar polyline | `flutter_polyline_points` | precisão 5 (default) |
+| Marcadores / linha | nativo do `flutter_map` (`MarkerLayer`, `PolylineLayer`) | — |
+| SSE (status em tempo real) | `sse_client` ou `http` + parse manual | opcional |
+
+Esboço de tela (pseudo-Flutter):
+```dart
+FlutterMap(
+  options: MapOptions(initialCenter: origem, initialZoom: 14),
+  children: [
+    TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'),
+    PolylineLayer(polylines: [
+      Polyline(points: routePoints, strokeWidth: 4, color: Colors.black),
+    ]),
+    MarkerLayer(markers: [
+      Marker(point: origem, child: const Icon(Icons.trip_origin)),
+      ...stops.map((s) => Marker(point: s, child: const Icon(Icons.circle))),
+      Marker(point: destino, child: const Icon(Icons.flag)),
+      if (driverPos != null)
+        Marker(point: driverPos, child: const Icon(Icons.local_taxi)),
+    ]),
+  ],
+)
+```
+
+> ⚠️ **Política de tiles OSM:** o tile server público do OpenStreetMap tem
+> [usage policy](https://operations.osmfoundation.org/policies/tiles/) e **não** serve
+> apps em produção/escala (precisa User-Agent identificável e proíbe alto volume).
+> Para o MVP/testes serve. Ao crescer, troque a `urlTemplate` por um provedor com free
+> tier (MapTiler/Stadia/Protomaps) ou self-host de tiles. **Isso é decisão/config do
+> app — não muda nada no backend.**
+
+---
+
+## 7. Resumo dos endpoints (cola rápida)
+
+| Endpoint | Método | Quando o app chama | Para o mapa |
+|----------|--------|--------------------|-------------|
+| `/rides/estimate` | POST | tela de confirmação (1×) | rota preview + preço |
+| `/rides` + `/rides/{id}/confirm-payment` | POST | criar corrida | — |
+| `/rides/{id}/route` | GET | abrir corrida (**1×**) | **polyline da rota** |
+| `/rides/{id}` | GET | **polling 5s** | pin do motorista + status |
+| `/rides/{id}/status-stream` | GET (SSE) | abrir corrida (stream) | reagir a transições |
+| `/rides/{id}/driver-location` | PUT | **só motorista, a cada 10s** | alimenta o pin |
+| `/share/{token}` | GET (público) | link compartilhado | acompanhamento externo |
+
+---
+
+## 8. Fora de escopo (não esperar do backend)
+
+- **Turn-by-turn / navegação por voz** — não existe; é a camada paga dos apps reais.
+- **Recálculo de rota se o motorista desviar** — a linha é o trajeto orçamentário (mesma
+  filosofia do cache de rotas, regra 11). Ela não se "ajusta" ao caminho real do motorista.
+- **Posição do motorista por push/WebSocket** — é via polling de 5s (regra 10). O SSE
+  empurra **status**, não localização.
+- **Tiles pagos / mapa proprietário** — usar OSM grátis; trocar de provedor é config do app.
