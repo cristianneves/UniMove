@@ -42,14 +42,20 @@ class OsrmMapsService implements MapsService {
         String hash = RouteHasher.hash(waypoints);
 
         Optional<RouteCache> cached = cacheRepository.findByRouteHash(hash);
-        if (cached.isPresent()) {
+        if (cached.isPresent() && cached.get().getGeometry() != null) {
             RouteCache r = cached.get();
-            return new RouteInfo(r.getDistanciaKm(), r.getTempoMin());
+            return new RouteInfo(r.getDistanciaKm(), r.getTempoMin(), r.getGeometry());
         }
 
         OsrmResponse response = fetchFromOsrm(waypoints);
         RouteInfo info = parse(response);
-        persist(hash, info);
+        if (cached.isPresent()) {
+            // Hit parcial: rota cacheada antes desta feature, sem geometria.
+            // Rebusca no OSRM (uma vez) e completa a linha do trajeto no cache.
+            backfillGeometry(cached.get(), info);
+        } else {
+            persist(hash, info);
+        }
         return info;
     }
 
@@ -65,7 +71,10 @@ class OsrmMapsService implements MapsService {
         String path = "/route/v1/driving/" + coords;
         try {
             return osrmWebClient.get()
-                    .uri(uri -> uri.path(path).queryParam("overview", "false").build())
+                    .uri(uri -> uri.path(path)
+                            .queryParam("overview", "full")
+                            .queryParam("geometries", "polyline")
+                            .build())
                     .retrieve()
                     .bodyToMono(OsrmResponse.class)
                     .block(BLOCK_TIMEOUT);
@@ -86,7 +95,7 @@ class OsrmMapsService implements MapsService {
         BigDecimal distanciaKm = BigDecimal.valueOf(first.distance() / 1000.0)
                 .setScale(3, RoundingMode.HALF_UP);
         int tempoMin = (int) Math.round(first.duration() / 60.0);
-        return new RouteInfo(distanciaKm, tempoMin);
+        return new RouteInfo(distanciaKm, tempoMin, first.geometry());
     }
 
     private void persist(String hash, RouteInfo info) {
@@ -95,13 +104,24 @@ class OsrmMapsService implements MapsService {
             entity.setRouteHash(hash);
             entity.setDistanciaKm(info.distanciaKm());
             entity.setTempoMin(info.tempoMin());
+            entity.setGeometry(info.geometry());
             cacheRepository.save(entity);
         } catch (DataIntegrityViolationException race) {
             log.debug("Race no insert do cache para hash {} — outro thread venceu.", hash);
         }
     }
 
+    /** Completa a geometria de uma entrada de cache antiga (criada sem polyline). */
+    private void backfillGeometry(RouteCache entity, RouteInfo info) {
+        try {
+            entity.setGeometry(info.geometry());
+            cacheRepository.save(entity);
+        } catch (RuntimeException e) {
+            log.debug("Falha no backfill de geometria do cache {} — ignorado.", entity.getRouteHash());
+        }
+    }
+
     record OsrmResponse(List<OsrmRoute> routes) {}
 
-    record OsrmRoute(double distance, double duration) {}
+    record OsrmRoute(double distance, double duration, String geometry) {}
 }

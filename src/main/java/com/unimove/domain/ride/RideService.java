@@ -18,6 +18,7 @@ import com.unimove.domain.ride.dto.RatingResponse;
 import com.unimove.domain.ride.dto.RideHistoryItem;
 import com.unimove.domain.ride.dto.RideMuralItem;
 import com.unimove.domain.ride.dto.RideResponse;
+import com.unimove.domain.ride.dto.RideRouteResponse;
 import com.unimove.domain.ride.dto.RideStatusEvent;
 import com.unimove.domain.ride.dto.StopPoint;
 import com.unimove.domain.ride.dto.SubmitRatingRequest;
@@ -98,7 +99,7 @@ public class RideService {
         RideCategory category = req.category() != null ? req.category() : RideCategory.CARRO;
         BigDecimal preco = pricingPolicy.calculate(
                 route.distanciaKm(), route.tempoMin(), category, passageiro.cidade());
-        return new EstimateResponse(route.distanciaKm(), route.tempoMin(), preco);
+        return new EstimateResponse(route.distanciaKm(), route.tempoMin(), preco, route.geometry());
     }
 
     @Transactional
@@ -126,6 +127,7 @@ public class RideService {
         }
         ride.setDistanciaKm(route.distanciaKm());
         ride.setTempoMin(route.tempoMin());
+        ride.setRouteGeometry(route.geometry());
         ride.setPreco(preco);
         ride.setStatus(RideStatus.PENDING_PAYMENT);
 
@@ -342,6 +344,19 @@ public class RideService {
         }
 
         return RideResponse.from(ride, computeDriverDistanceKm(ride), motoristaAvg, motoristaCount);
+    }
+
+    /**
+     * Geometria (polyline) do trajeto da corrida (regra 19). Endpoint leve, chamado
+     * UMA vez pelo front para desenhar a rota — fora do polling. A linha e estatica
+     * durante a corrida, entao nao precisa entrar no GET /rides/{id}.
+     */
+    @Transactional(readOnly = true)
+    public RideRouteResponse getRoute(AuthenticatedUser user, UUID rideId) {
+        Ride ride = rideRepository.findById(rideId)
+                .orElseThrow(RideNotFoundException::new);
+        assertParticipant(user, ride);
+        return new RideRouteResponse(ride.getRouteGeometry());
     }
 
     /**
