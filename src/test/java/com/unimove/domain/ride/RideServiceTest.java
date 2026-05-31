@@ -342,7 +342,7 @@ class RideServiceTest {
     @DisplayName("accept: transição AVAILABLE_IN_MURAL → DRIVER_EN_ROUTE + acceptedAt")
     void acceptTransitionsAndStampsAcceptedAt() {
         Ride ride = rideAvailable(pax.userId(), CIDADE);
-        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+        when(rideRepository.findByIdFetchingStops(ride.getId())).thenReturn(Optional.of(ride));
 
         Instant before = Instant.now();
         RideResponse resp = rideService.accept(mot, ride.getId());
@@ -357,7 +357,7 @@ class RideServiceTest {
     @DisplayName("accept de outra cidade → DriverCityMismatchException")
     void acceptFailsForDifferentCity() {
         Ride ride = rideAvailable(pax.userId(), OUTRA_CIDADE);
-        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+        when(rideRepository.findByIdFetchingStops(ride.getId())).thenReturn(Optional.of(ride));
 
         assertThatThrownBy(() -> rideService.accept(mot, ride.getId()))
                 .isInstanceOf(DriverCityMismatchException.class);
@@ -367,7 +367,7 @@ class RideServiceTest {
     @DisplayName("accept fora de AVAILABLE_IN_MURAL → IllegalRideTransitionException")
     void acceptFailsIfNotAvailable() {
         Ride ride = ridePending(pax.userId());
-        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+        when(rideRepository.findByIdFetchingStops(ride.getId())).thenReturn(Optional.of(ride));
 
         assertThatThrownBy(() -> rideService.accept(mot, ride.getId()))
                 .isInstanceOf(IllegalRideTransitionException.class);
@@ -377,7 +377,7 @@ class RideServiceTest {
     @DisplayName("accept com localizacao: calcula ETA via OSRM e semeia posicao do motorista")
     void acceptWithLocationComputesPickupEta() {
         Ride ride = rideAvailable(pax.userId(), CIDADE);
-        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+        when(rideRepository.findByIdFetchingStops(ride.getId())).thenReturn(Optional.of(ride));
         when(mapsService.route(anyDouble(), anyDouble(), anyDouble(), anyDouble()))
                 .thenReturn(new RouteInfo(new BigDecimal("2.100"), 7, "poly_pickup"));
 
@@ -395,7 +395,7 @@ class RideServiceTest {
     @DisplayName("accept com localizacao mas OSRM fora: aceita sem ETA (best-effort)")
     void acceptWithLocationStillSucceedsWhenOsrmFails() {
         Ride ride = rideAvailable(pax.userId(), CIDADE);
-        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+        when(rideRepository.findByIdFetchingStops(ride.getId())).thenReturn(Optional.of(ride));
         when(mapsService.route(anyDouble(), anyDouble(), anyDouble(), anyDouble()))
                 .thenThrow(new MapsUnavailableException("OSRM fora"));
 
@@ -405,6 +405,24 @@ class RideServiceTest {
         assertThat(resp.status()).isEqualTo(RideStatus.DRIVER_EN_ROUTE);
         assertThat(resp.pickupEtaMin()).isNull();
         assertThat(resp.driverCurrentLat()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("accept: persiste via save() do detached (preserva o lock otimista @Version)")
+    void acceptPersistsViaExplicitSave() {
+        Ride ride = rideAvailable(pax.userId(), CIDADE);
+        when(rideRepository.findByIdFetchingStops(ride.getId())).thenReturn(Optional.of(ride));
+
+        rideService.accept(mot, ride.getId());
+
+        // O accept roda fora de transacao: a mutacao so chega ao banco por um
+        // save() explicito. E nesse UPDATE ... WHERE version=? que o @Version
+        // barra dois motoristas aceitando a mesma corrida (→ 409).
+        ArgumentCaptor<Ride> saved = ArgumentCaptor.forClass(Ride.class);
+        verify(rideRepository).save(saved.capture());
+        assertThat(saved.getValue().getId()).isEqualTo(ride.getId());
+        assertThat(saved.getValue().getStatus()).isEqualTo(RideStatus.DRIVER_EN_ROUTE);
+        assertThat(saved.getValue().getMotoristaId()).isEqualTo(mot.userId());
     }
 
     // ------------------------------------------------------------------------
@@ -751,7 +769,7 @@ class RideServiceTest {
     @DisplayName("accept: emite evento de status DRIVER_EN_ROUTE sem fechar o stream")
     void acceptBroadcastsStatusEvent() {
         Ride ride = rideAvailable(pax.userId(), CIDADE);
-        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+        when(rideRepository.findByIdFetchingStops(ride.getId())).thenReturn(Optional.of(ride));
 
         rideService.accept(mot, ride.getId());
 
