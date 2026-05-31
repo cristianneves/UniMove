@@ -98,7 +98,10 @@ public class RideService {
         this.statusSseHub = statusSseHub;
     }
 
-    @Transactional(readOnly = true)
+    // Sem @Transactional de proposito: estimate so toca o OSRM (chamada externa)
+    // e o PricingPolicy (cache em memoria). Abrir uma transacao aqui prenderia
+    // uma conexao do pool durante todo o round-trip ao OSRM, sem nenhum acesso
+    // ao banco para justificar (regra 10).
     public EstimateResponse estimate(AuthenticatedUser passageiro, EstimateRequest req) {
         RouteInfo route = mapsService.route(buildWaypoints(
                 req.latOrigem(), req.lngOrigem(), req.latDestino(), req.lngDestino(), req.stops()));
@@ -119,7 +122,10 @@ public class RideService {
         return new EstimateResponse(route.distanciaKm(), route.tempoMin(), preco, route.geometry(), options);
     }
 
-    @Transactional
+    // Sem @Transactional no metodo: a rota do OSRM (chamada externa, potencialmente
+    // lenta) e calculada ANTES de tocar o banco, fora de qualquer transacao. O
+    // requireActive e o save() rodam cada um em sua transacao curta — assim nenhuma
+    // conexao do pool fica presa durante o round-trip ao OSRM (regra 10).
     public RideResponse create(AuthenticatedUser passageiro, CreateRideRequest req) {
         userAccountService.requireActive(passageiro.userId());
         RouteInfo route = mapsService.route(buildWaypoints(
@@ -208,17 +214,20 @@ public class RideService {
     }
 
     /** Aceite sem compartilhar localizacao — ETA de chegada na origem fica nulo. */
-    @Transactional
     public RideResponse accept(AuthenticatedUser motorista, UUID rideId) {
         return accept(motorista, rideId, null);
     }
 
-    @Transactional
+    // Sem @Transactional no metodo: o ETA de chegada (chamada ao OSRM) e calculado
+    // FORA de transacao para nao segurar conexao/lock do banco durante o round-trip
+    // externo (regra 10). A entidade e carregada com as paradas ja inicializadas,
+    // mutada em memoria e persistida por um save() em transacao curta — o merge do
+    // detached mantem o lock otimista @Version (vide nota antes do save).
     public RideResponse accept(AuthenticatedUser motorista, UUID rideId, AcceptRideRequest req) {
         userAccountService.requireActive(motorista.userId());
         driverService.assertCanAcceptRides(motorista.userId());
 
-        Ride ride = rideRepository.findById(rideId)
+        Ride ride = rideRepository.findByIdFetchingStops(rideId)
                 .orElseThrow(RideNotFoundException::new);
 
         if (!ride.getCidade().equals(motorista.cidade())) {
@@ -251,6 +260,12 @@ public class RideService {
                 ride.setPickupEtaAt(now);
             });
         }
+
+        // Persiste o aceite numa transacao curta (merge do detached). O lock
+        // otimista @Version vale no UPDATE ... WHERE version=?: se outro motorista
+        // aceitou primeiro, o save() lanca ObjectOptimisticLockingFailureException
+        // (→ 409) e o publishStatus abaixo nem chega a rodar.
+        rideRepository.save(ride);
 
         log.info("Ride {} aceita pelo motorista {} (pickupEtaMin={})",
                 ride.getId(), motorista.userId(), ride.getPickupEtaMin());

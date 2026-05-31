@@ -20,6 +20,16 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
     Optional<Ride> findByShareToken(UUID shareToken);
 
     /**
+     * Carrega a Ride com as paradas (stops) ja inicializadas numa unica query.
+     * Usado pelo accept(), que roda FORA de transacao (a chamada ao OSRM para o
+     * ETA nao pode segurar conexao/lock do banco): a entidade volta destacada,
+     * entao a colecao lazy precisa vir pronta para o RideResponse.from() nao
+     * estourar LazyInitializationException.
+     */
+    @Query("SELECT r FROM Ride r LEFT JOIN FETCH r.stops WHERE r.id = :id")
+    Optional<Ride> findByIdFetchingStops(@Param("id") UUID id);
+
+    /**
      * IDs das corridas que ja passaram do TTL no mural. Leve (so o id), apoiada
      * no indice parcial idx_rides_mural_created_at. O job de expiracao processa
      * cada id em sua propria transacao para isolar o lock otimista do aceite.
