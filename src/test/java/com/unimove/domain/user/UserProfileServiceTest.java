@@ -1,7 +1,11 @@
 package com.unimove.domain.user;
 
 import com.unimove.domain.user.dto.AdminResetPasswordResponse;
+import com.unimove.domain.user.dto.UpdateProfileRequest;
+import com.unimove.domain.user.dto.UpdateProfileResponse;
+import com.unimove.domain.user.dto.UserProfileResponse;
 import com.unimove.shared.security.AuthenticatedUser;
+import com.unimove.shared.security.JwtService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -11,6 +15,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -24,14 +29,17 @@ import static org.mockito.Mockito.when;
 /**
  * Testes unitários do {@link UserProfileService} com Mockito.
  *
- * Cobertura: troca de senha (validação da senha atual) e reset pelo admin
- * (bloqueio para contas ADMIN, geração de senha temporária).
+ * Cobertura: troca de senha (validação da senha atual), reset pelo admin
+ * (bloqueio para contas ADMIN, geração de senha temporária) e perfil
+ * (bloco de veículo para motorista, reemissão de token quando a cidade muda).
  */
 @ExtendWith(MockitoExtension.class)
 class UserProfileServiceTest {
 
     @Mock UserRepository userRepository;
+    @Mock DriverRepository driverRepository;
     @Mock PasswordEncoder passwordEncoder;
+    @Mock JwtService jwtService;
 
     @InjectMocks UserProfileService service;
 
@@ -116,5 +124,83 @@ class UserProfileServiceTest {
 
         assertThat(user.getPasswordHash()).isEqualTo("hash-antigo");
         verify(passwordEncoder, never()).encode(anyString());
+    }
+
+    @Test
+    @DisplayName("getProfile de passageiro não consulta drivers e vem sem bloco de veículo")
+    void getProfilePassenger() {
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+
+        UserProfileResponse resp = service.getProfile(auth);
+
+        assertThat(resp.userId()).isEqualTo(USER_ID);
+        assertThat(resp.email()).isEqualTo("p@example.com");
+        assertThat(resp.vehicle()).isNull();
+        verify(driverRepository, never()).findById(USER_ID);
+    }
+
+    @Test
+    @DisplayName("getProfile de motorista inclui o bloco de veículo")
+    void getProfileDriverIncludesVehicle() {
+        user.setRole(Role.MOTORISTA);
+        Driver driver = new Driver();
+        driver.setVehicleType(VehicleType.MOTO);
+        driver.setVehiclePlate("ABC1D23");
+        driver.setApproved(true);
+        driver.setOnline(false);
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+        when(driverRepository.findById(USER_ID)).thenReturn(Optional.of(driver));
+
+        UserProfileResponse resp = service.getProfile(auth);
+
+        assertThat(resp.vehicle()).isNotNull();
+        assertThat(resp.vehicle().vehicleType()).isEqualTo(VehicleType.MOTO);
+        assertThat(resp.vehicle().vehiclePlate()).isEqualTo("ABC1D23");
+        assertThat(resp.vehicle().approved()).isTrue();
+    }
+
+    @Test
+    @DisplayName("updateProfile sem mudança de cidade atualiza dados e não reemite token")
+    void updateProfileSameCityNoNewToken() {
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+
+        UpdateProfileResponse resp = service.updateProfile(auth,
+                new UpdateProfileRequest("  Maria S. Silva  ", "  ", "Remanso"));
+
+        assertThat(user.getName()).isEqualTo("Maria S. Silva");
+        assertThat(user.getPhone()).isNull();
+        assertThat(user.getCidade()).isEqualTo("remanso");
+        assertThat(resp.token()).isNull();
+        assertThat(resp.tokenExpiresAt()).isNull();
+        verify(jwtService, never()).generate(user);
+    }
+
+    @Test
+    @DisplayName("updateProfile com mudança de cidade normaliza e reemite o token")
+    void updateProfileCityChangeReissuesToken() {
+        Instant expires = Instant.now().plusSeconds(3600);
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+        when(jwtService.generate(user)).thenReturn(new JwtService.IssuedToken("novo-jwt", expires));
+
+        UpdateProfileResponse resp = service.updateProfile(auth,
+                new UpdateProfileRequest("Maria Silva", "(74) 99999-0000", "Casa Nova"));
+
+        assertThat(user.getCidade()).isEqualTo("casa-nova");
+        assertThat(user.getPhone()).isEqualTo("(74) 99999-0000");
+        assertThat(resp.token()).isEqualTo("novo-jwt");
+        assertThat(resp.tokenExpiresAt()).isEqualTo(expires);
+        assertThat(resp.profile().cidade()).isEqualTo("casa-nova");
+    }
+
+    @Test
+    @DisplayName("updateProfile rejeita cidade que normaliza para vazio")
+    void updateProfileInvalidCity() {
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> service.updateProfile(auth,
+                new UpdateProfileRequest("Maria Silva", null, "!!!")))
+                .isInstanceOf(InvalidCityException.class);
+
+        assertThat(user.getCidade()).isEqualTo("remanso");
     }
 }

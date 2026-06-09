@@ -1,6 +1,9 @@
 package com.unimove.domain.user;
 
 import com.unimove.domain.user.dto.ChangePasswordRequest;
+import com.unimove.domain.user.dto.UpdateProfileRequest;
+import com.unimove.domain.user.dto.UpdateProfileResponse;
+import com.unimove.domain.user.dto.UserProfileResponse;
 import com.unimove.shared.security.AuthenticatedUser;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -8,6 +11,7 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -24,6 +28,23 @@ public class UserProfileController {
 
     public UserProfileController(UserProfileService userProfileService) {
         this.userProfileService = userProfileService;
+    }
+
+    @GetMapping
+    @Operation(summary = "Perfil do usuário autenticado",
+            description = "Para MOTORISTA inclui o bloco `vehicle` (veículo, aprovação, online).")
+    public UserProfileResponse getProfile(@AuthenticationPrincipal AuthenticatedUser user) {
+        return userProfileService.getProfile(user);
+    }
+
+    @PutMapping
+    @Operation(summary = "Atualiza nome, telefone e cidade",
+            description = "E-mail e role são imutáveis. Se a cidade mudar, um novo JWT é retornado em "
+                    + "`token`/`tokenExpiresAt` (a claim `cidade` do token vigente fica desatualizada) "
+                    + "e o cliente deve substituí-lo.")
+    public UpdateProfileResponse updateProfile(@AuthenticationPrincipal AuthenticatedUser user,
+                                               @Valid @RequestBody UpdateProfileRequest req) {
+        return userProfileService.updateProfile(user, req);
     }
 
     @PutMapping("/password")
