@@ -1,8 +1,10 @@
 package com.unimove.domain.user;
 
+import com.unimove.domain.user.dto.AdminResetPasswordResponse;
 import com.unimove.domain.user.dto.SuspendUserRequest;
 import com.unimove.domain.user.dto.UserStatusResponse;
 import com.unimove.shared.security.AuthenticatedUser;
+import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -23,9 +25,12 @@ import java.util.UUID;
 public class AdminUserController {
 
     private final UserAccountService userAccountService;
+    private final UserProfileService userProfileService;
 
-    public AdminUserController(UserAccountService userAccountService) {
+    public AdminUserController(UserAccountService userAccountService,
+                               UserProfileService userProfileService) {
         this.userAccountService = userAccountService;
+        this.userProfileService = userProfileService;
     }
 
     @GetMapping("/suspended")
@@ -44,5 +49,14 @@ public class AdminUserController {
     public UserStatusResponse reactivate(@AuthenticationPrincipal AuthenticatedUser admin,
                                          @PathVariable UUID id) {
         return userAccountService.reactivate(id, admin.userId());
+    }
+
+    @PostMapping("/{id}/reset-password")
+    @Operation(summary = "Reseta a senha de um usuário (fluxo 'esqueci minha senha' do MVP)",
+            description = "Gera uma senha temporária exibida uma única vez na resposta. "
+                    + "O admin repassa ao usuário por canal externo. Não permitido para contas ADMIN.")
+    public AdminResetPasswordResponse resetPassword(@AuthenticationPrincipal AuthenticatedUser admin,
+                                                    @PathVariable UUID id) {
+        return userProfileService.resetPassword(id, admin.userId());
     }
 }
