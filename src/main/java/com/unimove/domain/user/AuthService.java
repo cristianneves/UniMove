@@ -21,15 +21,18 @@ public class AuthService {
     private final DriverRepository driverRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final LoginAttemptService loginAttemptService;
 
     public AuthService(UserRepository userRepository,
                        DriverRepository driverRepository,
                        PasswordEncoder passwordEncoder,
-                       JwtService jwtService) {
+                       JwtService jwtService,
+                       LoginAttemptService loginAttemptService) {
         this.userRepository = userRepository;
         this.driverRepository = driverRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
+        this.loginAttemptService = loginAttemptService;
     }
 
     @Transactional
@@ -70,11 +73,13 @@ public class AuthService {
     @Transactional(readOnly = true)
     public AuthResponse login(LoginRequest req) {
         String email = req.email().trim().toLowerCase();
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new BadCredentialsException("Credenciais inválidas"));
-        if (!passwordEncoder.matches(req.password(), user.getPasswordHash())) {
+        loginAttemptService.assertNotLocked(email);
+        User user = userRepository.findByEmail(email).orElse(null);
+        if (user == null || !passwordEncoder.matches(req.password(), user.getPasswordHash())) {
+            loginAttemptService.recordFailure(email);
             throw new BadCredentialsException("Credenciais inválidas");
         }
+        loginAttemptService.recordSuccess(email);
         if (user.getStatus() != UserStatus.ACTIVE) {
             throw new UserSuspendedException();
         }

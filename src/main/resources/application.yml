@@ -29,6 +29,13 @@ app:
     # Em prod, JWT_SECRET vem do ambiente. Default aqui so para nao quebrar startup em dev local.
     secret: ${JWT_SECRET:dev-secret-NAO-USE-EM-PRODUCAO-troque-via-env-var}
     expiration-ms: ${JWT_EXPIRATION_MS:86400000}
+  auth:
+    lockout:
+      # Apos max-attempts falhas seguidas (por e-mail), bloqueia o login por lockout-minutes.
+      enabled: ${LOGIN_LOCKOUT_ENABLED:true}
+      max-attempts: ${LOGIN_LOCKOUT_MAX_ATTEMPTS:5}
+      lockout-minutes: ${LOGIN_LOCKOUT_MINUTES:15}
+      cleanup-interval-ms: ${LOGIN_LOCKOUT_CLEANUP_INTERVAL_MS:600000}
   osrm:
     base-url: ${OSRM_BASE_URL:https://router.project-osrm.org}
   photon:
