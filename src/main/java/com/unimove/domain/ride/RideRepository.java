@@ -11,6 +11,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -18,6 +19,12 @@ import java.util.UUID;
 public interface RideRepository extends JpaRepository<Ride, UUID> {
 
     Optional<Ride> findByShareToken(UUID shareToken);
+
+    /** Passageiro ja tem corrida "viva"? Sustenta a regra de uma corrida ativa por vez. */
+    boolean existsByPassageiroIdAndStatusIn(UUID passageiroId, Collection<RideStatus> statuses);
+
+    /** Motorista ja esta comprometido com uma corrida? Bloqueia aceite duplo. */
+    boolean existsByMotoristaIdAndStatusIn(UUID motoristaId, Collection<RideStatus> statuses);
 
     /**
      * Carrega a Ride com as paradas (stops) ja inicializadas numa unica query.

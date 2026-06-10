@@ -46,6 +46,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -79,6 +80,7 @@ class RideServiceTest {
     @Mock UserAccountService userAccountService;
     @Mock ChatSseHub chatSseHub;
     @Mock RideStatusSseHub statusSseHub;
+    @Mock MuralSseHub muralSseHub;
 
     @InjectMocks RideService rideService;
 
@@ -98,6 +100,35 @@ class RideServiceTest {
         lenient().when(driverService.getVehicleType(mot.userId())).thenReturn(VehicleType.CARRO);
         lenient().when(cancellationPolicy.computeFee(any(), any(), any(), any()))
                 .thenReturn(BigDecimal.ZERO);
+    }
+
+    // ------------------------------------------------------------------------
+    // corrida ativa única (create/accept)
+    // ------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("create: passageiro com corrida ativa → ActiveRideExistsException, sem chamar o OSRM")
+    void createBlockedWhenPassengerHasActiveRide() {
+        when(rideRepository.existsByPassageiroIdAndStatusIn(eq(pax.userId()), anyCollection()))
+                .thenReturn(true);
+
+        assertThatThrownBy(() -> rideService.create(pax, defaultRequest()))
+                .isInstanceOf(ActiveRideExistsException.class);
+
+        verify(mapsService, never()).route(anyList());
+        verify(rideRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("accept: motorista com corrida ativa → ActiveRideExistsException, sem carregar a corrida")
+    void acceptBlockedWhenDriverHasActiveRide() {
+        when(rideRepository.existsByMotoristaIdAndStatusIn(eq(mot.userId()), anyCollection()))
+                .thenReturn(true);
+
+        assertThatThrownBy(() -> rideService.accept(mot, UUID.randomUUID()))
+                .isInstanceOf(ActiveRideExistsException.class);
+
+        verify(rideRepository, never()).findByIdFetchingStops(any());
     }
 
     // ------------------------------------------------------------------------

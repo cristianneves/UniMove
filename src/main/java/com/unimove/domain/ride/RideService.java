@@ -62,6 +62,15 @@ public class RideService {
     /** Teto de itens na lista de destinos recentes (tela "para onde vamos?"). */
     private static final int MAX_RECENT_DESTINATIONS = 20;
 
+    /** Estados em que a corrida ainda esta "viva" para o passageiro — bloqueiam criar outra. */
+    private static final List<RideStatus> PASSENGER_ACTIVE_STATUSES = List.of(
+            RideStatus.PENDING_PAYMENT, RideStatus.AVAILABLE_IN_MURAL,
+            RideStatus.DRIVER_EN_ROUTE, RideStatus.IN_PROGRESS);
+
+    /** Estados em que o motorista esta comprometido com uma corrida — bloqueiam novo aceite. */
+    private static final List<RideStatus> DRIVER_ACTIVE_STATUSES = List.of(
+            RideStatus.DRIVER_EN_ROUTE, RideStatus.IN_PROGRESS);
+
     private final RideRepository rideRepository;
     private final RideRatingRepository rideRatingRepository;
     private final MapsService mapsService;
@@ -73,6 +82,7 @@ public class RideService {
     private final UserAccountService userAccountService;
     private final ChatSseHub chatSseHub;
     private final RideStatusSseHub statusSseHub;
+    private final MuralSseHub muralSseHub;
 
     public RideService(RideRepository rideRepository,
                        RideRatingRepository rideRatingRepository,
@@ -84,7 +94,8 @@ public class RideService {
                        UserRatingService userRatingService,
                        UserAccountService userAccountService,
                        ChatSseHub chatSseHub,
-                       RideStatusSseHub statusSseHub) {
+                       RideStatusSseHub statusSseHub,
+                       MuralSseHub muralSseHub) {
         this.rideRepository = rideRepository;
         this.rideRatingRepository = rideRatingRepository;
         this.mapsService = mapsService;
@@ -96,6 +107,7 @@ public class RideService {
         this.userAccountService = userAccountService;
         this.chatSseHub = chatSseHub;
         this.statusSseHub = statusSseHub;
+        this.muralSseHub = muralSseHub;
     }
 
     // Sem @Transactional de proposito: estimate so toca o OSRM (chamada externa)
@@ -128,6 +140,12 @@ public class RideService {
     // conexao do pool fica presa durante o round-trip ao OSRM (regra 10).
     public RideResponse create(AuthenticatedUser passageiro, CreateRideRequest req) {
         userAccountService.requireActive(passageiro.userId());
+        // Uma corrida ativa por passageiro. Checagem barata no banco ANTES do
+        // round-trip ao OSRM. Como o metodo roda sem transacao, ha uma janela
+        // de corrida entre o exists e o save — aceitavel no MVP.
+        if (rideRepository.existsByPassageiroIdAndStatusIn(passageiro.userId(), PASSENGER_ACTIVE_STATUSES)) {
+            throw ActiveRideExistsException.forPassenger();
+        }
         RouteInfo route = mapsService.route(buildWaypoints(
                 req.latOrigem(), req.lngOrigem(), req.latDestino(), req.lngDestino(), req.stops()));
 
@@ -203,6 +221,7 @@ public class RideService {
 
         log.info("Ride {} confirmada ({}) → AVAILABLE_IN_MURAL", ride.getId(), req.method());
         publishStatus(ride);
+        publishMuralAdded(ride);
         return RideResponse.from(ride);
     }
 
@@ -226,6 +245,12 @@ public class RideService {
     public RideResponse accept(AuthenticatedUser motorista, UUID rideId, AcceptRideRequest req) {
         userAccountService.requireActive(motorista.userId());
         driverService.assertCanAcceptRides(motorista.userId());
+
+        // Uma corrida ativa por motorista: quem esta DRIVER_EN_ROUTE/IN_PROGRESS
+        // nao aceita outra ate finalizar.
+        if (rideRepository.existsByMotoristaIdAndStatusIn(motorista.userId(), DRIVER_ACTIVE_STATUSES)) {
+            throw ActiveRideExistsException.forDriver();
+        }
 
         Ride ride = rideRepository.findByIdFetchingStops(rideId)
                 .orElseThrow(RideNotFoundException::new);
@@ -270,6 +295,7 @@ public class RideService {
         log.info("Ride {} aceita pelo motorista {} (pickupEtaMin={})",
                 ride.getId(), motorista.userId(), ride.getPickupEtaMin());
         publishStatus(ride);
+        publishMuralRemoved(ride, MuralSseHub.REASON_ACCEPTED);
         return RideResponse.from(ride, computeDriverDistanceKm(ride));
     }
 
@@ -355,6 +381,9 @@ public class RideService {
                 ride.getId(), user.userId(), user.role(), ride.getCancellationFee());
         chatSseHub.closeRide(rideId);
         publishStatus(ride);
+        if (statusBefore == RideStatus.AVAILABLE_IN_MURAL) {
+            publishMuralRemoved(ride, MuralSseHub.REASON_CANCELLED);
+        }
         return RideResponse.from(ride);
     }
 
@@ -455,6 +484,28 @@ public class RideService {
         }
         if (snapshot.terminal()) {
             statusSseHub.closeRide(rideId);
+        }
+        return emitter;
+    }
+
+    /**
+     * Abre o SSE do mural (motorista online, mesma cidade/categoria). Emite
+     * imediatamente um snapshot da lista atual — mesma garantia do status-stream:
+     * reconectou, recebeu a verdade corrente. Depois, eventos incrementais
+     * "ride-added"/"ride-removed" mantem a lista do app sem polling.
+     */
+    @Transactional(readOnly = true)
+    public SseEmitter subscribeMural(AuthenticatedUser motorista) {
+        driverService.assertCanAcceptRides(motorista.userId());
+        RideCategory category = RideCategory.fromVehicleType(
+                driverService.getVehicleType(motorista.userId()));
+        List<RideMuralItem> snapshot = rideRepository.findMural(motorista.cidade(), category);
+
+        SseEmitter emitter = muralSseHub.register(motorista.cidade(), category);
+        try {
+            emitter.send(MuralSseHub.snapshotEvent(snapshot));
+        } catch (IOException e) {
+            emitter.complete();
         }
         return emitter;
     }
@@ -562,6 +613,7 @@ public class RideService {
         ride.setExpiredAt(Instant.now());
         log.info("Ride {} expirada no mural (nenhum motorista aceitou dentro do TTL)", rideId);
         publishStatus(ride);
+        publishMuralRemoved(ride, MuralSseHub.REASON_EXPIRED);
         return true;
     }
 
@@ -577,30 +629,52 @@ public class RideService {
     }
 
     /**
-     * Publica a transicao de estado no SSE de status (regra 18). O broadcast
-     * roda em afterCommit: so emitimos o evento depois que a transacao confirma,
-     * evitando notificar uma transicao que pode dar rollback — em especial o
-     * expireRide, cujo commit pode falhar por lock otimista se um motorista
-     * aceitar concorrentemente. Eventos terminais fecham o stream apos o envio.
+     * Publica a transicao de estado no SSE de status (regra 18). Eventos
+     * terminais fecham o stream apos o envio.
      */
     private void publishStatus(Ride ride) {
         RideStatusEvent event = RideStatusEvent.from(ride);
         UUID rideId = ride.getId();
-        Runnable emit = () -> {
+        runAfterCommit(() -> {
             statusSseHub.broadcast(rideId, event);
             if (event.terminal()) {
                 statusSseHub.closeRide(rideId);
             }
-        };
+        });
+    }
+
+    /** Corrida entrou no mural — avisa os motoristas conectados ao stream da cidade/categoria. */
+    private void publishMuralAdded(Ride ride) {
+        RideMuralItem item = RideMuralItem.from(ride);
+        String cidade = ride.getCidade();
+        RideCategory category = ride.getCategory();
+        runAfterCommit(() -> muralSseHub.broadcastAdded(cidade, category, item));
+    }
+
+    /** Corrida saiu do mural (aceita, cancelada ou expirada) — remove da lista dos conectados. */
+    private void publishMuralRemoved(Ride ride, String reason) {
+        UUID rideId = ride.getId();
+        String cidade = ride.getCidade();
+        RideCategory category = ride.getCategory();
+        runAfterCommit(() -> muralSseHub.broadcastRemoved(cidade, category, rideId, reason));
+    }
+
+    /**
+     * Broadcasts SSE rodam em afterCommit: so emitimos depois que a transacao
+     * confirma, evitando notificar uma transicao que pode dar rollback — em
+     * especial o expireRide, cujo commit pode falhar por lock otimista se um
+     * motorista aceitar concorrentemente. Fora de transacao, roda na hora.
+     */
+    private void runAfterCommit(Runnable action) {
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    emit.run();
+                    action.run();
                 }
             });
         } else {
-            emit.run();
+            action.run();
         }
     }
 
