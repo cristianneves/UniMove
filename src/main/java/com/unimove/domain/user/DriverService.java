@@ -74,6 +74,16 @@ public class DriverService {
         driverRepository.updateLastSeenAt(userId, Instant.now());
     }
 
+    /**
+     * Marca offline motoristas sem atividade desde o cutoff. Chamado pelo
+     * {@code DriverAutoOfflineScheduler} — evita mural "fantasma" com motorista
+     * que fechou o app sem tocar em "ficar offline".
+     */
+    @Transactional
+    public int markStaleDriversOffline(Instant cutoff) {
+        return driverRepository.markStaleOnlineDriversOffline(cutoff);
+    }
+
     @Transactional(readOnly = true)
     public void assertCanAcceptRides(UUID userId) {
         Driver d = driverRepository.findById(userId)

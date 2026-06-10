@@ -36,6 +36,12 @@ app:
       max-attempts: ${LOGIN_LOCKOUT_MAX_ATTEMPTS:5}
       lockout-minutes: ${LOGIN_LOCKOUT_MINUTES:15}
       cleanup-interval-ms: ${LOGIN_LOCKOUT_CLEANUP_INTERVAL_MS:600000}
+  driver:
+    presence:
+      # Motorista online sem nenhum request ha mais que offline-after-minutes e marcado offline pelo sistema.
+      enabled: ${DRIVER_AUTO_OFFLINE_ENABLED:true}
+      offline-after-minutes: ${DRIVER_AUTO_OFFLINE_MINUTES:10}
+      scan-interval-ms: ${DRIVER_AUTO_OFFLINE_SCAN_INTERVAL_MS:60000}
   osrm:
     base-url: ${OSRM_BASE_URL:https://router.project-osrm.org}
   photon:
