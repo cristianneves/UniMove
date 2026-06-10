@@ -7,7 +7,7 @@ import org.springframework.context.annotation.Configuration;
 import java.time.Clock;
 
 @Configuration
-@EnableConfigurationProperties(LoginLockoutProperties.class)
+@EnableConfigurationProperties({LoginLockoutProperties.class, DriverPresenceProperties.class})
 class UserConfig {
 
     @Bean

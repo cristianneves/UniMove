@@ -16,6 +16,19 @@ public interface DriverRepository extends JpaRepository<Driver, UUID> {
     @Query("UPDATE Driver d SET d.lastSeenAt = :now WHERE d.user.id = :userId")
     int updateLastSeenAt(@Param("userId") UUID userId, @Param("now") Instant now);
 
+    /**
+     * Marca offline, em lote, motoristas online sem atividade desde o cutoff.
+     * Usado pelo {@code DriverAutoOfflineScheduler}. lastSeenAt nulo tambem
+     * conta como inativo (motorista que nunca fez request apos ficar online).
+     */
+    @Modifying
+    @Query("""
+            UPDATE Driver d SET d.online = false
+            WHERE d.online = true
+              AND (d.lastSeenAt IS NULL OR d.lastSeenAt < :cutoff)
+            """)
+    int markStaleOnlineDriversOffline(@Param("cutoff") Instant cutoff);
+
     @Query("""
             SELECT new com.unimove.domain.user.dto.PendingDriverItem(
                 d.user.id, d.user.name, d.user.email, d.user.phone, d.user.cidade,

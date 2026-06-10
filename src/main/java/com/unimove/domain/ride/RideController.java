@@ -76,6 +76,12 @@ public class RideController {
         return rideService.listMural(user);
     }
 
+    @GetMapping(value = "/mural/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @PreAuthorize("hasRole('MOTORISTA')")
+    public SseEmitter muralStream(@AuthenticationPrincipal AuthenticatedUser user) {
+        return rideService.subscribeMural(user);
+    }
+
     @GetMapping("/history")
     @PreAuthorize("hasAnyRole('PASSAGEIRO', 'MOTORISTA')")
     public Page<RideHistoryItem> history(@AuthenticationPrincipal AuthenticatedUser user,
