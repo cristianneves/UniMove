@@ -39,4 +39,8 @@ public interface DriverRepository extends JpaRepository<Driver, UUID> {
             ORDER BY d.user.createdAt ASC
             """)
     List<PendingDriverItem> findPending();
+
+    long countByOnlineTrue();
+
+    long countByApprovedFalse();
 }

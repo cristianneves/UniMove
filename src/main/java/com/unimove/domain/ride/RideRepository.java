@@ -137,6 +137,50 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
                                         @Param("from") Instant from,
                                         @Param("to") Instant to);
 
+    /**
+     * Agregação de corridas do período (por created_at) para o painel admin:
+     * total, contagens por status final e somatórios de receita. Uma única query.
+     */
+    @Query("""
+            SELECT new com.unimove.domain.ride.dto.RideMetricsAggregate(
+                COUNT(r),
+                SUM(CASE WHEN r.status = com.unimove.domain.ride.RideStatus.COMPLETED THEN 1L ELSE 0L END),
+                SUM(CASE WHEN r.status = com.unimove.domain.ride.RideStatus.CANCELLED THEN 1L ELSE 0L END),
+                SUM(CASE WHEN r.status = com.unimove.domain.ride.RideStatus.EXPIRED   THEN 1L ELSE 0L END),
+                COALESCE(SUM(CASE WHEN r.status = com.unimove.domain.ride.RideStatus.COMPLETED THEN r.preco ELSE 0 END), 0),
+                COALESCE(SUM(COALESCE(r.cancellationFee, 0)), 0)
+            )
+            FROM Ride r
+            WHERE r.createdAt >= :from AND r.createdAt < :to
+            """)
+    com.unimove.domain.ride.dto.RideMetricsAggregate aggregateRideMetrics(@Param("from") Instant from,
+                                                                          @Param("to") Instant to);
+
+    interface RideMetricsDayRow {
+        java.sql.Date getDay();
+        long getTotal();
+        long getCompleted();
+        java.math.BigDecimal getRevenue();
+    }
+
+    /**
+     * Série diária do painel admin (por created_at): corridas criadas no dia,
+     * quantas concluíram e a receita das concluídas. Espelha o estilo nativo de
+     * {@code findDriverEarningsByDay}.
+     */
+    @Query(value = """
+            SELECT CAST(created_at AS DATE) AS day,
+                   COUNT(*) AS total,
+                   SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) AS completed,
+                   COALESCE(SUM(CASE WHEN status = 'COMPLETED' THEN preco ELSE 0 END), 0) AS revenue
+            FROM rides
+            WHERE created_at >= :from AND created_at < :to
+            GROUP BY CAST(created_at AS DATE)
+            ORDER BY day
+            """, nativeQuery = true)
+    List<RideMetricsDayRow> findRideMetricsByDay(@Param("from") Instant from,
+                                                 @Param("to") Instant to);
+
     interface EarningsDayRow {
         java.sql.Date getDay();
         long getRides();
