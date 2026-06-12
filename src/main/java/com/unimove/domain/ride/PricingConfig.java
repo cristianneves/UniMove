@@ -45,6 +45,14 @@ public class PricingConfig {
     @Column(name = "per_min", nullable = false, precision = 10, scale = 2)
     private BigDecimal perMin;
 
+    /** Surge so atua quando ligado (opt-in por cidade+categoria). */
+    @Column(name = "surge_enabled", nullable = false)
+    private boolean surgeEnabled;
+
+    /** Teto do multiplicador de surge (1.00..3.00; default 1.50). */
+    @Column(name = "surge_cap", nullable = false, precision = 3, scale = 2)
+    private BigDecimal surgeCap = new BigDecimal("1.50");
+
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 

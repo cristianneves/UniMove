@@ -96,6 +96,12 @@ public class DriverService {
         }
     }
 
+    /** Motoristas online da cidade para o tipo de veiculo — oferta bruta consumida pelo surge. */
+    @Transactional(readOnly = true)
+    public long countOnline(String cidade, VehicleType vehicleType) {
+        return driverRepository.countOnlineByCidadeAndVehicleType(cidade, vehicleType);
+    }
+
     @Transactional(readOnly = true)
     public VehicleType getVehicleType(UUID userId) {
         return driverRepository.findById(userId)

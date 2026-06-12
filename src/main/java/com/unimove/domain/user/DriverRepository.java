@@ -43,4 +43,14 @@ public interface DriverRepository extends JpaRepository<Driver, UUID> {
     long countByOnlineTrue();
 
     long countByApprovedFalse();
+
+    /** Motoristas online de uma cidade para um tipo de veiculo — denominador bruto do surge. */
+    @Query("""
+            SELECT COUNT(d) FROM Driver d
+            WHERE d.online = true
+              AND d.user.cidade = :cidade
+              AND d.vehicleType = :vehicleType
+            """)
+    long countOnlineByCidadeAndVehicleType(@Param("cidade") String cidade,
+                                           @Param("vehicleType") VehicleType vehicleType);
 }

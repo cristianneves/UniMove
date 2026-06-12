@@ -12,4 +12,12 @@ public enum RideCategory {
             case CARRO -> CARRO;
         };
     }
+
+    /** Mapeamento inverso 1:1 — usado pelo surge para contar a oferta por tipo de veiculo. */
+    public VehicleType toVehicleType() {
+        return switch (this) {
+            case MOTO -> VehicleType.MOTO;
+            case CARRO -> VehicleType.CARRO;
+        };
+    }
 }

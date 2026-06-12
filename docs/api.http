@@ -93,6 +93,36 @@ Authorization: Bearer {{adminToken}}
 GET {{host}}/admin/metrics?from=2026-05-01&to=2026-05-31
 Authorization: Bearer {{adminToken}}
 
+### 2.6 Tarifa por cidade — listar
+GET {{host}}/admin/pricing
+Authorization: Bearer {{adminToken}}
+
+### 2.7 Tarifa + surge — upsert (liga surge com teto 1.5x para a cidade)
+PUT {{host}}/admin/pricing
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "cidade": "Remanso",
+  "category": "CARRO",
+  "base": 5.50,
+  "perKm": 2.10,
+  "perMin": 0.20,
+  "surgeEnabled": true,
+  "surgeCap": 1.50
+}
+
+### 2.8 Estimate — preco ja inclui surge; surgeMultiplier exposto por categoria
+# (chamar como PASSAGEIRO; ver campo surgeMultiplier no response e em cada option)
+POST {{host}}/rides/estimate
+Authorization: Bearer {{passageiroToken}}
+Content-Type: application/json
+
+{
+  "latOrigem": -9.6200, "lngOrigem": -42.0800,
+  "latDestino": -9.6300, "lngDestino": -42.0900
+}
+
 
 ###############################################################
 # 3. MOTORISTA — status online/offline

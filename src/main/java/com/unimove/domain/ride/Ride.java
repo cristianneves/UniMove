@@ -89,6 +89,14 @@ public class Ride {
     private BigDecimal preco;
 
     /**
+     * Multiplicador de surge vigente na criacao da corrida (1.00 = sem surge).
+     * Congelado junto com {@code preco}: o passageiro confirma e paga este valor,
+     * sem race condition. Auditoria em /admin/rides e base do recibo.
+     */
+    @Column(name = "surge_multiplier", nullable = false, precision = 3, scale = 2)
+    private BigDecimal surgeMultiplier = BigDecimal.ONE;
+
+    /**
      * Polyline codificada (precisao 5) do trajeto origem→...→destino, capturada
      * do OSRM na criacao. Usada pelo front para desenhar a linha da rota no mapa.
      * Coluna TEXT propria da rides; NAO entra nas projecoes leves do mural/historico
