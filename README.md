@@ -120,7 +120,7 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 | Bloco                       | Status        | Observacoes |
 |-----------------------------|---------------|-------------|
 | Scaffold (pom, profiles)    | concluido     | Spring Boot 3.3.5 + Java 21 |
-| Schema (`V1`-`V14`)         | concluido     | users (com `status`), drivers, rides (com `@Version`, `share_token` e `route_geometry`), route_cache (com `geometry`), ride_ratings, saved_places, cancellation_fee, category, pricing_configs, chat_messages, ride_stops, geocode_cache |
+| Schema (`V1`-`V18`)         | concluido     | users (com `status`), drivers, rides (com `@Version`, `share_token`, `route_geometry` e `surge_multiplier`), route_cache (com `geometry`), ride_ratings, saved_places, cancellation_fee, category, pricing_configs (com `surge_enabled`/`surge_cap`), chat_messages, ride_stops, geocode_cache |
 | `shared` (security, JWT, exception handler) | concluido | `GlobalExceptionHandler` cobre validacao, lock otimista, `BusinessException` |
 | `domain.user`               | concluido     | `/auth/*`, online/offline, admin approve, `/saved-places`, denormalizacao de rating, **suspensao/reativacao via `/admin/users/*`** |
 | `domain.maps`               | concluido     | `MapsService` + `OsrmMapsService` (cache-aside via `route_cache`, polyline pro mapa); `GeocodingService` + `PhotonGeocodingService` (busca de endereço/`reverse` via Photon, `geocode_cache`) |
@@ -137,6 +137,7 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 | Suspensao de usuario        | concluido     | `POST /admin/users/{id}/suspend|reactivate`; enforcement assimetrico (login + acoes de escrita) |
 | Share publico da viagem     | concluido     | `share_token` em toda ride; `GET /share/{token}` publico, 410 ao terminar |
 | Tarifa configuravel         | concluido     | `pricing_configs(cidade, category, base, per_km, per_min)` + cache em memoria; ADMIN edita via `PUT /admin/pricing` |
+| Surge pricing (preco dinamico) | concluido  | `SurgePolicy` — multiplicador automatico por demanda/oferta (cidade+categoria), ladder em degraus com teto; opt-in por cidade (`surge_enabled`/`surge_cap`). Congelado em `rides.surge_multiplier` no create; exposto no `estimate` |
 | Chat in-app via SSE         | concluido     | `chat_messages.seq BIGSERIAL` + `Last-Event-ID` pra reconexao; heartbeat 15s |
 | Multiplas paradas           | concluido     | `stops` (max 5) em `POST /rides`/`/estimate`; tabela `ride_stops`; rota como sequencia de waypoints |
 | Geometria da rota (mapa)    | concluido     | OSRM `overview=full&geometries=polyline`; `GET /rides/{id}/route`, polyline no estimate/share; `route_geometry` + `route_cache.geometry` |

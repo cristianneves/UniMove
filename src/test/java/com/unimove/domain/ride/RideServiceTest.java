@@ -73,6 +73,7 @@ class RideServiceTest {
     @Mock RideRatingRepository rideRatingRepository;
     @Mock MapsService mapsService;
     @Mock PricingPolicy pricingPolicy;
+    @Mock SurgePolicy surgePolicy;
     @Mock CancellationPolicy cancellationPolicy;
     @Mock PaymentService paymentService;
     @Mock DriverService driverService;
@@ -100,6 +101,9 @@ class RideServiceTest {
         lenient().when(driverService.getVehicleType(mot.userId())).thenReturn(VehicleType.CARRO);
         lenient().when(cancellationPolicy.computeFee(any(), any(), any(), any()))
                 .thenReturn(BigDecimal.ZERO);
+        // Surge desligado por default: preco = base. Testes de surge re-stubam.
+        lenient().when(surgePolicy.multiplier(anyString(), any(RideCategory.class)))
+                .thenReturn(BigDecimal.ONE);
     }
 
     // ------------------------------------------------------------------------
@@ -308,6 +312,61 @@ class RideServiceTest {
                         org.assertj.core.groups.Tuple.tuple(RideCategory.CARRO, new BigDecimal("16.30")));
         // preco de compatibilidade = categoria default (CARRO)
         assertThat(resp.preco()).isEqualByComparingTo("16.30");
+    }
+
+    // ------------------------------------------------------------------------
+    // surge pricing
+    // ------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("create: surge multiplica a tarifa base e e congelado na ride")
+    void createAppliesAndFreezesSurge() {
+        when(mapsService.route(anyList()))
+                .thenReturn(new RouteInfo(new BigDecimal("5.000"), 12, "poly_surge"));
+        when(pricingPolicy.calculate(any(BigDecimal.class), eq(12), any(RideCategory.class), anyString()))
+                .thenReturn(new BigDecimal("20.00"));
+        when(surgePolicy.multiplier(eq(CIDADE), eq(RideCategory.CARRO)))
+                .thenReturn(new BigDecimal("1.30"));
+        when(rideRepository.save(any(Ride.class))).thenAnswer(inv -> {
+            Ride r = inv.getArgument(0);
+            if (r.getId() == null) r.setId(UUID.randomUUID());
+            return r;
+        });
+
+        RideResponse resp = rideService.create(pax, defaultRequest());
+
+        // 20.00 * 1.30 = 26.00, travado no preco e no multiplicador da ride
+        assertThat(resp.preco()).isEqualByComparingTo("26.00");
+        assertThat(resp.surgeMultiplier()).isEqualByComparingTo("1.30");
+        ArgumentCaptor<Ride> saved = ArgumentCaptor.forClass(Ride.class);
+        verify(rideRepository).save(saved.capture());
+        assertThat(saved.getValue().getSurgeMultiplier()).isEqualByComparingTo("1.30");
+    }
+
+    @Test
+    @DisplayName("estimate: surge por categoria entra no preco e e exposto no multiplicador")
+    void estimateAppliesSurgePerCategory() {
+        when(mapsService.route(anyList()))
+                .thenReturn(new RouteInfo(new BigDecimal("4.000"), 10, "poly_surge_est"));
+        when(pricingPolicy.calculate(any(BigDecimal.class), eq(10), eq(RideCategory.MOTO), anyString()))
+                .thenReturn(new BigDecimal("10.00"));
+        when(pricingPolicy.calculate(any(BigDecimal.class), eq(10), eq(RideCategory.CARRO), anyString()))
+                .thenReturn(new BigDecimal("20.00"));
+        when(surgePolicy.multiplier(eq(CIDADE), eq(RideCategory.MOTO))).thenReturn(new BigDecimal("1.20"));
+        when(surgePolicy.multiplier(eq(CIDADE), eq(RideCategory.CARRO))).thenReturn(new BigDecimal("1.50"));
+
+        EstimateResponse resp = rideService.estimate(pax, new EstimateRequest(
+                new BigDecimal("-20.82000"), new BigDecimal("-49.38000"),
+                new BigDecimal("-20.83000"), new BigDecimal("-49.39000")));
+
+        assertThat(resp.options())
+                .extracting(CategoryOption::category, CategoryOption::preco, CategoryOption::surgeMultiplier)
+                .containsExactlyInAnyOrder(
+                        org.assertj.core.groups.Tuple.tuple(RideCategory.MOTO, new BigDecimal("12.00"), new BigDecimal("1.20")),
+                        org.assertj.core.groups.Tuple.tuple(RideCategory.CARRO, new BigDecimal("30.00"), new BigDecimal("1.50")));
+        // compatibilidade: categoria default (CARRO) com surge 1.50 -> 30.00
+        assertThat(resp.preco()).isEqualByComparingTo("30.00");
+        assertThat(resp.surgeMultiplier()).isEqualByComparingTo("1.50");
     }
 
     // ------------------------------------------------------------------------

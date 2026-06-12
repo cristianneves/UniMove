@@ -14,6 +14,8 @@ public record PricingConfigResponse(
         BigDecimal base,
         BigDecimal perKm,
         BigDecimal perMin,
+        boolean surgeEnabled,
+        BigDecimal surgeCap,
         Instant updatedAt,
         UUID updatedByAdminId
 ) {
@@ -25,6 +27,8 @@ public record PricingConfigResponse(
                 c.getBase(),
                 c.getPerKm(),
                 c.getPerMin(),
+                c.isSurgeEnabled(),
+                c.getSurgeCap(),
                 c.getUpdatedAt(),
                 c.getUpdatedByAdminId()
         );

@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 
@@ -16,12 +17,19 @@ public class PricingConfigService {
 
     private static final Logger log = LoggerFactory.getLogger(PricingConfigService.class);
 
+    /** Teto de surge default quando o admin nao informa (espelha o default da coluna). */
+    private static final BigDecimal DEFAULT_SURGE_CAP = new BigDecimal("1.50");
+
     private final PricingConfigRepository repository;
     private final PricingPolicy pricingPolicy;
+    private final SurgePolicy surgePolicy;
 
-    public PricingConfigService(PricingConfigRepository repository, PricingPolicy pricingPolicy) {
+    public PricingConfigService(PricingConfigRepository repository,
+                                PricingPolicy pricingPolicy,
+                                SurgePolicy surgePolicy) {
         this.repository = repository;
         this.pricingPolicy = pricingPolicy;
+        this.surgePolicy = surgePolicy;
     }
 
     @Transactional(readOnly = true)
@@ -44,13 +52,17 @@ public class PricingConfigService {
         cfg.setBase(req.base());
         cfg.setPerKm(req.perKm());
         cfg.setPerMin(req.perMin());
+        cfg.setSurgeEnabled(Boolean.TRUE.equals(req.surgeEnabled()));
+        cfg.setSurgeCap(req.surgeCap() != null ? req.surgeCap() : DEFAULT_SURGE_CAP);
         cfg.setUpdatedByAdminId(adminId);
         PricingConfig saved = repository.save(cfg);
 
         pricingPolicy.reload();
-        log.info("Pricing config upsert por admin {}: cidade={} category={} base={} perKm={} perMin={}",
+        surgePolicy.reload();
+        log.info("Pricing config upsert por admin {}: cidade={} category={} base={} perKm={} perMin={} surge={} cap={}",
                 adminId, saved.getCidade(), saved.getCategory(),
-                saved.getBase(), saved.getPerKm(), saved.getPerMin());
+                saved.getBase(), saved.getPerKm(), saved.getPerMin(),
+                saved.isSurgeEnabled(), saved.getSurgeCap());
         return PricingConfigResponse.from(saved);
     }
 
@@ -69,6 +81,7 @@ public class PricingConfigService {
         repository.delete(cfg);
 
         pricingPolicy.reload();
+        surgePolicy.reload();
         log.info("Pricing config removida por admin {}: cidade={} category={}", adminId, resolved, category);
     }
 }

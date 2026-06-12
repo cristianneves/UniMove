@@ -13,11 +13,15 @@ import java.util.List;
  *
  * {@code preco} e mantido por compatibilidade: e o preco da categoria pedida no
  * request (ou CARRO por default). Clientes novos devem usar {@code options}.
+ *
+ * {@code surgeMultiplier} e o multiplicador de surge da categoria pedida (1.00 =
+ * sem surge), espelhando o {@code preco}; cada opcao traz o seu proprio.
  */
 public record EstimateResponse(
         BigDecimal distanciaKm,
         Integer tempoMin,
         BigDecimal preco,
+        BigDecimal surgeMultiplier,
         String geometry,
         List<CategoryOption> options
 ) {}

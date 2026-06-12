@@ -65,8 +65,8 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
     @Query(
             value = """
                     SELECT new com.unimove.domain.ride.dto.AdminRideItem(
-                        r.id, r.cidade, r.status, r.category, r.paymentMethod, r.preco, r.cancellationFee,
-                        r.passageiroId, r.motoristaId,
+                        r.id, r.cidade, r.status, r.category, r.paymentMethod, r.preco, r.surgeMultiplier,
+                        r.cancellationFee, r.passageiroId, r.motoristaId,
                         r.createdAt, r.acceptedAt, r.completedAt, r.cancelledAt
                     )
                     FROM Ride r
@@ -74,6 +74,24 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
             countQuery = "SELECT count(r) FROM Ride r"
     )
     Page<AdminRideItem> findAllForAdmin(Pageable pageable);
+
+    /** Demanda do surge: corridas aguardando aceite no mural da cidade+categoria. */
+    long countByStatusAndCidadeAndCategory(RideStatus status, String cidade, RideCategory category);
+
+    /**
+     * Oferta ocupada do surge: motoristas distintos comprometidos com uma corrida ativa
+     * na cidade+categoria. Subtraido dos motoristas online para dar a oferta disponivel.
+     */
+    @Query("""
+            SELECT COUNT(DISTINCT r.motoristaId) FROM Ride r
+            WHERE r.cidade = :cidade
+              AND r.category = :category
+              AND r.motoristaId IS NOT NULL
+              AND r.status IN :statuses
+            """)
+    long countBusyDrivers(@Param("cidade") String cidade,
+                          @Param("category") RideCategory category,
+                          @Param("statuses") Collection<RideStatus> statuses);
 
     @Query(
             value = """

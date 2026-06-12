@@ -75,6 +75,7 @@ public class RideService {
     private final RideRatingRepository rideRatingRepository;
     private final MapsService mapsService;
     private final PricingPolicy pricingPolicy;
+    private final SurgePolicy surgePolicy;
     private final CancellationPolicy cancellationPolicy;
     private final PaymentService paymentService;
     private final DriverService driverService;
@@ -88,6 +89,7 @@ public class RideService {
                        RideRatingRepository rideRatingRepository,
                        MapsService mapsService,
                        PricingPolicy pricingPolicy,
+                       SurgePolicy surgePolicy,
                        CancellationPolicy cancellationPolicy,
                        PaymentService paymentService,
                        DriverService driverService,
@@ -100,6 +102,7 @@ public class RideService {
         this.rideRatingRepository = rideRatingRepository;
         this.mapsService = mapsService;
         this.pricingPolicy = pricingPolicy;
+        this.surgePolicy = surgePolicy;
         this.cancellationPolicy = cancellationPolicy;
         this.paymentService = paymentService;
         this.driverService = driverService;
@@ -119,19 +122,25 @@ public class RideService {
                 req.latOrigem(), req.lngOrigem(), req.latDestino(), req.lngDestino(), req.stops()));
 
         // Mesma rota (uma chamada ao OSRM) precificada em cada categoria — tela
-        // "escolha sua corrida". So o preco varia entre as opcoes.
+        // "escolha sua corrida". So o preco varia entre as opcoes. O surge e por
+        // categoria (oferta/demanda independentes) e ja entra no preco exibido.
+        RideCategory category = req.category() != null ? req.category() : RideCategory.CARRO;
         List<CategoryOption> options = new ArrayList<>();
+        BigDecimal preco = null;
+        BigDecimal surge = BigDecimal.ONE.setScale(2);
         for (RideCategory c : RideCategory.values()) {
-            options.add(new CategoryOption(c, pricingPolicy.calculate(
-                    route.distanciaKm(), route.tempoMin(), c, passageiro.cidade())));
+            BigDecimal mult = surgePolicy.multiplier(passageiro.cidade(), c);
+            BigDecimal p = applySurge(pricingPolicy.calculate(
+                    route.distanciaKm(), route.tempoMin(), c, passageiro.cidade()), mult);
+            options.add(new CategoryOption(c, p, mult));
+            // preco/surge mantidos por compatibilidade: categoria pedida (ou CARRO default).
+            if (c == category) {
+                preco = p;
+                surge = mult;
+            }
         }
 
-        // preco mantido por compatibilidade: categoria pedida (ou CARRO default).
-        RideCategory category = req.category() != null ? req.category() : RideCategory.CARRO;
-        BigDecimal preco = pricingPolicy.calculate(
-                route.distanciaKm(), route.tempoMin(), category, passageiro.cidade());
-
-        return new EstimateResponse(route.distanciaKm(), route.tempoMin(), preco, route.geometry(), options);
+        return new EstimateResponse(route.distanciaKm(), route.tempoMin(), preco, surge, route.geometry(), options);
     }
 
     // Sem @Transactional no metodo: a rota do OSRM (chamada externa, potencialmente
@@ -150,8 +159,11 @@ public class RideService {
                 req.latOrigem(), req.lngOrigem(), req.latDestino(), req.lngDestino(), req.stops()));
 
         RideCategory category = req.category() != null ? req.category() : RideCategory.CARRO;
-        BigDecimal preco = pricingPolicy.calculate(
-                route.distanciaKm(), route.tempoMin(), category, passageiro.cidade());
+        // Surge resolvido e CONGELADO aqui: o passageiro paga este multiplicador,
+        // gravado junto com o preco — sem race condition (preco fixado no create).
+        BigDecimal surge = surgePolicy.multiplier(passageiro.cidade(), category);
+        BigDecimal preco = applySurge(pricingPolicy.calculate(
+                route.distanciaKm(), route.tempoMin(), category, passageiro.cidade()), surge);
 
         Ride ride = new Ride();
         ride.setPassageiroId(passageiro.userId());
@@ -172,6 +184,7 @@ public class RideService {
         ride.setTempoMin(route.tempoMin());
         ride.setRouteGeometry(route.geometry());
         ride.setPreco(preco);
+        ride.setSurgeMultiplier(surge);
         ride.setStatus(RideStatus.PENDING_PAYMENT);
 
         Ride saved = rideRepository.save(ride);
@@ -180,6 +193,11 @@ public class RideService {
                 saved.getStops().size(), preco);
 
         return RideResponse.from(saved);
+    }
+
+    /** Aplica o multiplicador de surge sobre a tarifa base. Compartilhado por estimate e create. */
+    private static BigDecimal applySurge(BigDecimal base, BigDecimal multiplier) {
+        return base.multiply(multiplier).setScale(2, RoundingMode.HALF_UP);
     }
 
     /**

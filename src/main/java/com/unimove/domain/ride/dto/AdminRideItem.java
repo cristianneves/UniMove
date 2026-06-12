@@ -15,6 +15,7 @@ public record AdminRideItem(
         RideCategory category,
         PaymentMethod paymentMethod,
         BigDecimal preco,
+        BigDecimal surgeMultiplier,
         BigDecimal cancellationFee,
         UUID passageiroId,
         UUID motoristaId,
