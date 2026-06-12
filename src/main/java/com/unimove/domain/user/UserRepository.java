@@ -17,4 +17,8 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     Optional<UserStatus> findStatusById(@Param("id") UUID id);
 
     Page<User> findByStatus(UserStatus status, Pageable pageable);
+
+    long countByRole(Role role);
+
+    long countByStatus(UserStatus status);
 }

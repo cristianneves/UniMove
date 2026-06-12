@@ -85,6 +85,14 @@ Authorization: Bearer {{adminToken}}
 GET {{host}}/admin/rides?page=0&size=20
 Authorization: Bearer {{adminToken}}
 
+### 2.4 Painel de metricas (default ultimos 30 dias)
+GET {{host}}/admin/metrics
+Authorization: Bearer {{adminToken}}
+
+### 2.5 Painel de metricas com periodo explicito
+GET {{host}}/admin/metrics?from=2026-05-01&to=2026-05-31
+Authorization: Bearer {{adminToken}}
+
 
 ###############################################################
 # 3. MOTORISTA — status online/offline
