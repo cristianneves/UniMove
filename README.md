@@ -83,7 +83,11 @@ com.unimove
 - **OpenAPI JSON:** `http://localhost:8080/v3/api-docs`
 - **Coleção HTTP versionada:** [`docs/api.http`](./docs/api.http) — abre direto no IntelliJ HTTP Client ou VSCode REST Client.
 - **Smoke test ponta-a-ponta:** [`docs/smoke-test.md`](./docs/smoke-test.md) — checklist manual de ~10 min para validar release.
-- **Estado atual:** [`docs/estado-atual-projeto.md`](./docs/estado-atual-projeto.md).
+- **Estado atual:** [`docs/estado-atual-projeto.md`](./docs/estado-atual-projeto.md) — snapshot do que existe e do fluxo ponta-a-ponta.
+- **Visão geral e fluxo no Swagger:** [`docs/visao-geral-e-fluxo-swagger.md`](./docs/visao-geral-e-fluxo-swagger.md) — porquê de cada decisão de MVP + roteiro completo.
+- **Painel de métricas (admin):** [`docs/admin-metrics.md`](./docs/admin-metrics.md) — contrato do `GET /admin/metrics`.
+- **Surge pricing:** [`docs/plano-surge-pricing.md`](./docs/plano-surge-pricing.md) — spec do preço dinâmico por demanda.
+- **Análise/roadmap:** [`docs/analise-mvp.md`](./docs/analise-mvp.md) — lacunas priorizadas para o piloto real.
 
 ---
 
@@ -147,17 +151,23 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 
 ### Testes
 
-Cobertura atual (`mvn test`):
+Cobertura atual (`mvn test`) — 14 classes, **127 testes**:
 
 - `AuthControllerWebMvcTest` (MockMvc) — fluxos de register/login
+- `AuthServiceLoginLockoutTest` — lockout após tentativas de login falhas
+- `LoginAttemptServiceTest` — janela/contagem do lockout
 - `JwtServiceTest` — emissao e validacao de token
 - `CityNormalizerTest` — normalizacao de cidade
 - `RouteHasherTest` — hash deterministico das rotas OSRM
 - `OsrmMapsServiceTest` — cache hit/miss (incl. backfill de geometria), OSRM 5xx, payload vazio, race no insert, polyline persistida
 - `PhotonGeocodingServiceTest` — forward (sugestões + bias lat/lon), query vazia sem chamada, reverse cache miss/hit, Photon 5xx → 503, sem features → 503
-- `RideServiceTest` (Mockito) — máquina de estados ponta-a-ponta, regras de role no cancelamento, gating do `driver-location`, delegação do mural por cidade + categoria, invariante de preço calculado no backend a partir do OSRM, submitRating cross-role, paradas e geometria da rota
+- `RideServiceTest` (Mockito) — máquina de estados ponta-a-ponta, regras de role no cancelamento, gating do `driver-location`, delegação do mural por cidade + categoria, invariante de preço calculado no backend a partir do OSRM, submitRating cross-role, paradas, geometria da rota, pickup ETA e surge
+- `SurgePolicyTest` — ladder por faixa, teto (`surge_cap`), oferta = 0 → teto, `surge_enabled = false` → 1.0x, cidade/categoria sem demanda → 1.0x
+- `RideExpirationSchedulerTest` — expiração de corridas paradas no mural (EXPIRED)
+- `DriverAutoOfflineSchedulerTest` — auto-offline de motorista por inatividade
+- `UserProfileServiceTest` — edição de perfil, troca de senha, re-emissão de JWT ao mudar cidade
 - `AdminMetricsServiceTest` (Mockito) — painel admin: derivação de `active`/taxas/ticket médio, defaulting do período (últimos 30 dias), range invertido → 400, agregado nulo → zeros
 
-Total: **59 testes** passando em ~6 s (sem Docker/Postgres).
+Total: **127 testes** passando em segundos (JUnit 5 + Mockito, sem Docker/Postgres).
 
 > **Lock otimista:** não é exercitado em unit test (depende do `@Version` do Hibernate em runtime). A garantia vem do schema (`rides.version`) + tradução de `ObjectOptimisticLockingFailureException` para HTTP 409 no `GlobalExceptionHandler`. Valide manualmente via `docs/smoke-test.md` seção 5 (aceite por dois motoristas).

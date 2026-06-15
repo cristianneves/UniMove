@@ -172,6 +172,12 @@ Pra o app definir origem/destino/paradas estilo Uber/99 há dois caminhos: **dig
 
 **Por quê Photon e não Nominatim:** o requisito-cabeça é **autocomplete "as you type"**, que a instância pública do Nominatim **proíbe** e não foi desenhada pra fazer. Photon resolve forward **e** reverse num provedor só, mesmo espírito grátis/OSM/self-hostável do OSRM. **Por quê não Google Places:** custa por request e exige chave/billing — fora da filosofia R$ 0 do MVP. Geocoding **não toca** o fluxo de corrida: só produz o `lat/lng` que `POST /rides`/`/estimate` já consomem. Erros do Photon → `MapsUnavailableException` (HTTP 503).
 
+### 3.19 **Surge pricing automático** em ladder de degraus, não precificação contínua
+
+O preço base (`PricingPolicy`) é multiplicado por um fator de surge calculado por `SurgePolicy` por `(cidade, category)`. O sinal é **demanda ÷ oferta**: demanda = rides em `AVAILABLE_IN_MURAL` na cidade+categoria (já indexado); oferta = motoristas `online` **sem** corrida ativa (`DRIVER_EN_ROUTE`/`IN_PROGRESS`). A ladder é **discreta** (ex.: `<1.0 → 1.0x`, `1.0–1.5 → 1.2x`, `1.5–2.0 → 1.35x`, `≥2.0 ou oferta=0 → teto`), com teto configurável (`surge_cap`, default 1.5x). É **opt-in por cidade** (`surge_enabled`, default desligado). O multiplicador é **congelado** em `rides.surge_multiplier` no `create` (lê o mesmo estado do `estimate` → o passageiro nunca vê 1.2x e é cobrado 1.35x) e exposto no `EstimateResponse`/`CategoryOption` (`surgeMultiplier`) pra UI mostrar "1.3x".
+
+**Por quê ladder e não curva contínua:** degraus são **explicáveis e estáveis** ("acima de 2 corridas por motorista, 1.5x") — numa cidade pequena com 20–50 motoristas, um fator contínuo oscilaria a cada corrida criada/aceita e geraria desconfiança. **Por quê congelar no create:** elimina race condition entre preview e cobrança. **Por quê opt-in com teto baixo:** surge agressivo queima reputação no piloto; 1.5x é defensável e o ADMIN liga cidade a cidade. A ladder fica hardcoded (regra de produto estável); só `enabled` e `cap` são editáveis via `PUT /admin/pricing`. **Fronteira de domínio respeitada:** `domain.user` conta motoristas online, `domain.ride` conta os ocupados, `SurgePolicy` subtrai — nenhuma entidade JPA cruza o pacote. Cálculo roda fora de transação (como o `estimate`).
+
 ---
 
 ## 4. O que ficou de fora do MVP (e por quê)
@@ -283,7 +289,7 @@ O `lat/lng` escolhido (dropdown ou pin) alimenta os campos de origem/destino/`st
   "category": "MOTO"
 }
 ```
-✅ Retorna `{ "distanciaKm": ..., "tempoMin": ..., "preco": ..., "geometry": "<polyline>" }`. A `geometry` (Encoded Polyline precisão 5) já permite o app desenhar o trajeto no preview. Primeira chamada vai no OSRM; chamadas subsequentes com a mesma sequência de coordenadas batem no `route_cache`.
+✅ Retorna `{ "distanciaKm": ..., "tempoMin": ..., "preco": ..., "surgeMultiplier": 1.00, "geometry": "<polyline>", "options": [ { "category": "MOTO", "preco": ..., "surgeMultiplier": 1.00 }, ... ] }`. A `geometry` (Encoded Polyline precisão 5) já permite o app desenhar o trajeto no preview. `options` traz a MESMA rota precificada por categoria (tela "escolha sua corrida") e cada uma carrega seu `surgeMultiplier` (1.00 = sem surge; a UI mostra "1.3x" quando ligado). Primeira chamada vai no OSRM; chamadas subsequentes com a mesma sequência de coordenadas batem no `route_cache`.
 
 #### Passo 7 — Passageiro cria a corrida
 **`POST /rides`**
@@ -389,12 +395,13 @@ curl -N -H "Authorization: Bearer $TOKEN_BRUNO" \
 #### Passo 16 — (ADMIN) operações de painel
 **`Authorize`** com `TOKEN_ADMIN`.
 
-- **Configurar tarifa específica para SJRP:** `PUT /admin/pricing`
+- **Configurar tarifa específica para SJRP (com surge ligado):** `PUT /admin/pricing`
   ```json
   { "cidade": "sao-jose-do-rio-preto", "category": "MOTO",
-    "base": 4.00, "perKm": 1.80, "perMin": 0.15 }
+    "base": 4.00, "perKm": 1.80, "perMin": 0.15,
+    "surgeEnabled": true, "surgeCap": 1.50 }
   ```
-  ✅ Próxima `POST /rides/estimate` em SJRP usará esses valores; outras cidades caem no `_DEFAULT`.
+  ✅ Próxima `POST /rides/estimate` em SJRP usará esses valores; outras cidades caem no `_DEFAULT`. Com `surgeEnabled: true`, quando a demanda no mural superar a oferta de motoristas online (MOTO, SJRP), o `surgeMultiplier` sobe pela ladder até `surgeCap`. O upsert recarrega o cache da `PricingPolicy` **e** da `SurgePolicy`. `surgeEnabled`/`surgeCap` são opcionais (default `false`/`1.50`).
 
 - **Listar todas as configs:** `GET /admin/pricing` → 2 do `_DEFAULT` + a nova de SJRP.
 
@@ -427,6 +434,9 @@ curl -N -H "Authorization: Bearer $TOKEN_BRUNO" \
 | Suspender ADMIN | `POST /admin/users/{id-admin}/suspend` | 403 `CannotSuspendAdminException` |
 | Deletar pricing `_DEFAULT` | `DELETE /admin/pricing?cidade=_DEFAULT&category=CARRO` | 403 `CannotDeleteDefaultPricingException` |
 | Pricing por cidade override | PUT em SJRP, depois `/rides/estimate` em SJRP vs outra cidade | Preços diferem |
+| Surge desligado | `surgeEnabled=false` (default) na cidade, criar várias corridas | `surgeMultiplier = 1.00` sempre |
+| Surge sob demanda | `surgeEnabled=true`, criar mais corridas no mural que motoristas online (mesma cidade+categoria) | `surgeMultiplier > 1.00` no `estimate` e congelado em `rides.surge_multiplier` |
+| Surge respeita teto | Demanda ≫ oferta (ou oferta = 0) | `surgeMultiplier` não passa de `surgeCap` |
 | Geocode com query curta | `GET /maps/geocode?q=av` (2 chars) | 400 (Bean Validation, mín. 3) |
 | Reverse cacheado | `GET /maps/reverse?lat&lng` 2x com mesmas coords | 2ª vem do `geocode_cache`, sem rebater no Photon |
 | Geometria da rota | `GET /rides/{id}/route` numa ride criada pós-V13 | `geometry` não nula (polyline) |
@@ -437,4 +447,4 @@ curl -N -H "Authorization: Bearer $TOKEN_BRUNO" \
 
 ## 6. Resumo de uma linha
 
-**UniMove troca complexidade técnica por foco em mercado:** mural global ao invés de match geoespacial, polling ao invés de WebSockets, SSE ao invés de WebSocket pro chat, pagamento simulado ao invés de PSP real, aprovação manual ao invés de OCR, suspensão assimétrica ao invés de revogação por request, tarifa em tabela ao invés de surge dinâmico, polyline estática + Photon/OSM grátis ao invés de turn-by-turn e geocoding pago — tudo isso para subir o produto numa cidade-piloto com infra mínima e iterar a partir do uso real, sem queimar capital tentando ser Uber no dia 1. As features que **sobraram** (share público, chat in-app sem expor telefone, mapa com trajeto desenhado, busca de endereço com autocomplete, ADMIN com controle real de preço e contas) são exatamente as que cidade pequena percebe como diferencial.
+**UniMove troca complexidade técnica por foco em mercado:** mural global ao invés de match geoespacial, polling ao invés de WebSockets, SSE ao invés de WebSocket pro chat, pagamento simulado ao invés de PSP real, aprovação manual ao invés de OCR, suspensão assimétrica ao invés de revogação por request, surge dinâmico em ladder de degraus (opt-in por cidade) ao invés de precificação contínua, polyline estática + Photon/OSM grátis ao invés de turn-by-turn e geocoding pago — tudo isso para subir o produto numa cidade-piloto com infra mínima e iterar a partir do uso real, sem queimar capital tentando ser Uber no dia 1. As features que **sobraram** (share público, chat in-app sem expor telefone, mapa com trajeto desenhado, busca de endereço com autocomplete, surge automático demonstrável numa demo, ADMIN com controle real de preço e contas) são exatamente as que cidade pequena percebe como diferencial.

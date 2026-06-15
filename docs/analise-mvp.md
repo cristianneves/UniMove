@@ -4,7 +4,7 @@
 
 ## Visão geral
 
-O backend está **maduro** para a mecânica de corrida: monólito modular limpo (só interfaces cruzam fronteiras), transações disciplinadas (OSRM fora de transação, sem prender conexão do pool), lock otimista no aceite, SSE (status/mural/chat) com `afterCommit`, cache de geocode/rota, login lockout, auto-offline de motorista, expiração de corrida, ratings, earnings, saved places, share link, multi-paradas e pickup ETA.
+O backend está **maduro** para a mecânica de corrida: monólito modular limpo (só interfaces cruzam fronteiras), transações disciplinadas (OSRM fora de transação, sem prender conexão do pool), lock otimista no aceite, SSE (status/mural/chat) com `afterCommit`, cache de geocode/rota, login lockout, auto-offline de motorista, expiração de corrida, ratings, earnings, saved places, share link, multi-paradas, pickup ETA, painel de métricas do admin e **surge pricing (preço dinâmico por demanda, opt-in por cidade)**.
 
 As lacunas são de **levar ao piloto real**, não de mecânica de corrida.
 
@@ -25,7 +25,7 @@ As lacunas são de **levar ao piloto real**, não de mecânica de corrida.
 6. Só `/actuator/health` exposto. Adicionar Micrometer/Prometheus, correlation-id (MDC filter), expandir actuator (`info`, `metrics`). Operar o piloto sem isso é às cegas.
 
 ### Cobertura de testes
-7. Núcleo bem coberto (`RideService`, login, JWT, maps). Faltam: chat, saved-places, pricing, geocode-cache.
+7. Núcleo bem coberto (`RideService`, login/lockout, JWT, maps/geocode-cache, surge, métricas, perfil, schedulers de expiração/auto-offline — 127 testes). Faltam: chat e saved-places.
 
 ### Dívida de escala (não-bloqueador)
 8. Hubs SSE em memória — não sobrevivem a múltiplas instâncias. OK para single-instance no Railway; registrar dívida (Redis pub/sub no futuro).
@@ -38,11 +38,12 @@ As lacunas são de **levar ao piloto real**, não de mecânica de corrida.
 - Cupom de desconto / indicação (growth — bom para a narrativa de investidores).
 - Rating do passageiro visível no mural antes do aceite (campo já existe em `UserRatingService`).
 - Botão SOS / compartilhar viagem em andamento (share link já existe como base).
-- Dashboard admin com métricas (corridas/dia, receita, motoristas ativos).
+- ~~Dashboard admin com métricas (corridas/dia, receita, motoristas ativos).~~ ✅ **Implementado** — `GET /admin/metrics` (ver `docs/admin-metrics.md`).
+- ~~Surge pricing (preço dinâmico por demanda).~~ ✅ **Implementado** — `SurgePolicy`, opt-in por cidade (ver `docs/plano-surge-pricing.md`).
 
 ---
 
 ## Verificação (ao implementar um item escolhido)
-- `mvn test` (Testcontainers — atenção ao bug do Docker Desktop na máquina de dev; rodar via CLI/HTTP se Testcontainers quebrar).
+- `mvn test` (JUnit 5 + Mockito, sem Docker/Postgres — 127 testes em ~segundos). Validação com banco real é manual via `docs/smoke-test.md` + `docs/api.http`.
 - Para pagamento: testar webhook com payload simulado e checar idempotência.
 - `mvn spring-boot:run` + chamada manual ao endpoint novo.
