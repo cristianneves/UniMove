@@ -1,6 +1,6 @@
 # UniMove — Estado atual do projeto
 
-> Snapshot em **2026-05-29**. Branch `feature/geocoding-enderecos` + histórico com **suspensão de usuário**, **compartilhamento público de viagem**, **tarifa dinâmica configurável**, **chat in-app via SSE**, **status da corrida via SSE**, **múltiplas paradas**, **geometria da rota pro mapa** e **busca de endereço (geocoding via Photon)** aplicados.
+> Snapshot em **2026-06-14**. Branch `feature/surge-pricing` + histórico com **suspensão de usuário**, **compartilhamento público de viagem**, **tarifa dinâmica configurável**, **surge pricing (preço dinâmico por demanda)**, **chat in-app via SSE**, **status da corrida via SSE**, **múltiplas paradas**, **geometria da rota pro mapa**, **busca de endereço (geocoding via Photon)**, **expiração de corrida no mural**, **ETA de chegada no aceite**, **destinos recentes**, **lockout de login**, **auto-offline de motorista** e **edição de perfil** aplicados.
 > Documento de visão geral: o que existe, como o fluxo funciona, se está pronto para MVP e para integração com o frontend.
 
 ---
@@ -99,7 +99,7 @@ O backend monolítico do UniMove já cobre o **fluxo ponta-a-ponta de uma corrid
 
 ### 2.6 `shared`
 
-- `SecurityConfig` (CORS + filtro JWT + endpoints públicos).
+- `SecurityConfig` (filtro JWT + endpoints públicos). **CORS ainda não configurado** — necessário antes de plugar o painel admin web (ver `docs/analise-mvp.md`).
 - `LastSeenInterceptor` + `WebMvcConfig` atualizam `drivers.last_seen_at` a cada request autenticado de motorista.
 - `GlobalExceptionHandler` consolida todos os erros e formata `ApiError`.
 - `Haversine` para distância em linha reta no polling de localização.
@@ -121,8 +121,13 @@ Migrações Flyway:
 - **`V9__pricing_configs.sql`** — tabela `pricing_configs(cidade, category, base, per_km, per_min, …)` com `UNIQUE(cidade, category)` + seed `_DEFAULT` preservando a fórmula histórica.
 - **`V10__chat_messages.sql`** — tabela `chat_messages` (id, **seq BIGSERIAL**, ride_id FK, sender_id, sender_role, body 1–1000, created_at) + índice `(ride_id, seq)`.
 - **`V11__ride_stops.sql`** — tabela `ride_stops` (ride_id FK, seq, lat, lng) para as paradas intermediárias (máx. 5), com `@OrderColumn(seq)`.
+- **`V12__ride_expiration.sql`** — novo estado terminal `EXPIRED` no check constraint de `rides.status`. Corrida parada em `AVAILABLE_IN_MURAL` além do TTL (`app.ride.expiration.ttl-minutes`) é transicionada por job `@Scheduled` — distinto de `CANCELLED` p/ analytics e UX ("nenhum motorista disponível").
 - **`V13__route_geometry.sql`** — coluna `route_cache.geometry TEXT` (polyline cacheada) + coluna `rides.route_geometry TEXT` (polyline da corrida; nula em rides anteriores → front cai em fallback de linha reta).
 - **`V14__geocode_cache.sql`** — tabela `geocode_cache` (id, `coord_hash VARCHAR(64) UNIQUE`, display_name, street, city, state, lat/lng `NUMERIC(10,7)`, created_at) — cache do reverse geocoding.
+- **`V15__ride_pickup_eta.sql`** — colunas `rides.pickup_eta_min INT` e `pickup_eta_at TIMESTAMPTZ` (nullable). ETA motorista→origem calculado por UMA chamada OSRM no aceite (com body `{lat,lng}`); nunca no polling. Cliente antigo / sem GPS / rides antigas ficam nulos → fallback no front.
+- **`V16__ride_addresses.sql`** — colunas `rides.origem_endereco`/`destino_endereco VARCHAR(200)` (nullable) + índice parcial `idx_rides_passageiro_recent (passageiro_id, created_at DESC) WHERE destino_endereco IS NOT NULL`. Sustenta `GET /rides/recent-destinations` ("destinos recentes" estilo Uber) sem reverse-geocoding posterior.
+- **`V17__surge_config.sql`** — estende `pricing_configs` com `surge_enabled BOOLEAN NOT NULL DEFAULT false` (opt-in) e `surge_cap NUMERIC(3,2) NOT NULL DEFAULT 1.50` (teto, check `1.00..3.00`). A ladder ratio→multiplicador fica no código (`SurgePolicy`); só liga/desliga e teto são configuráveis por cidade+categoria.
+- **`V18__ride_surge_multiplier.sql`** — coluna `rides.surge_multiplier NUMERIC(3,2) NOT NULL DEFAULT 1.00` (check `>= 1.00`). Congela o multiplicador vigente no `create` (junto com `preco`) — auditoria, recibo e `/admin/rides`. Rides anteriores recebem `1.00`.
 
 Pontos fortes do schema:
 - `version BIGINT` em `rides` viabilizando o lock otimista do aceite.
@@ -179,10 +184,11 @@ ADMIN configura preço por cidade em `PUT /admin/pricing` e suspende contas prob
 - **Suspensão de usuário pelo ADMIN** — `POST /admin/users/{id}/suspend|reactivate`. Enforcement **assimétrico**: bloqueia login + ações críticas (create/accept/online) mas não onera polling. Conta ADMIN não pode ser suspensa.
 - **Compartilhamento público da viagem** — `GET /share/{token}` (sem auth) entrega payload mínimo (sem PII) com posição em tempo real do motorista. Estado final → HTTP 410.
 - **Tarifa configurável por cidade** — ADMIN edita via `PUT /admin/pricing`. `PricingPolicy` mantém cache em memória recarregado a cada upsert; `_DEFAULT` protegido contra deleção.
+- **Surge pricing (preço dinâmico por demanda)** — `SurgePolicy` calcula multiplicador automático por `(cidade, category)` a partir do sinal `demanda (mural) ÷ oferta (motoristas online − ocupados)`, ladder em degraus com teto (`surge_cap`). Opt-in por cidade (`surge_enabled`); cache recarregado no upsert do ADMIN. Multiplicador **congelado** em `rides.surge_multiplier` no `create` (sem race) e exposto no `estimate` (`surgeMultiplier` por categoria). Respeita a fronteira de domínio (user conta online, ride conta ocupados).
 - **Chat in-app via SSE** — `GET /chat/rides/{id}/stream` (SSE) + `POST .../messages` + `GET .../messages` (histórico). Habilitado apenas em `DRIVER_EN_ROUTE`/`IN_PROGRESS`. Persistente em `chat_messages` com `seq BIGSERIAL` para reconexão via `Last-Event-ID`. Heartbeat 15s + `closeRide()` no fim da corrida.
 - **Segurança coerente:** stateless, sem refresh token (escopo do MVP), `@PreAuthorize` por endpoint, filtro JWT cobrindo o pipeline. `/share/**` é o único endpoint público fora de `/auth/**`.
 - **GlobalExceptionHandler** traduz exceções de domínio para HTTP semânticos — bom contrato para o frontend.
-- **Cobertura de testes (55, sem Docker/Postgres):** `OsrmMapsServiceTest` (cache hit/miss + backfill de geometria + polyline), `PhotonGeocodingServiceTest` (forward + bias, reverse cache hit/miss, Photon 5xx → 503), `RouteHasherTest`, `AuthControllerWebMvcTest`, `JwtServiceTest`, `CityNormalizerTest` e `RideServiceTest` (Mockito) cobrindo máquina de estados, regras de role no cancelamento, gating do `driver-location`, delegação do mural, paradas, geometria da rota e invariante de preço calculado no backend. Lock otimista é validado por inspeção do schema + manualmente via `docs/smoke-test.md` (não tem unit test possível sem Hibernate em runtime).
+- **Cobertura de testes (127 testes em 14 classes, sem Docker/Postgres):** `OsrmMapsServiceTest` (cache hit/miss + backfill de geometria + polyline), `PhotonGeocodingServiceTest` (forward + bias, reverse cache hit/miss, Photon 5xx → 503), `RouteHasherTest`, `AuthControllerWebMvcTest`, `AuthServiceLoginLockoutTest` + `LoginAttemptServiceTest` (lockout), `JwtServiceTest`, `CityNormalizerTest`, `UserProfileServiceTest` (perfil/senha/re-emissão de JWT), `DriverAutoOfflineSchedulerTest`, `RideExpirationSchedulerTest`, `SurgePolicyTest` (ladder/teto/oferta=0/disabled), `AdminMetricsServiceTest` e `RideServiceTest` (Mockito) cobrindo máquina de estados, regras de role no cancelamento, gating do `driver-location`, delegação do mural, paradas, geometria da rota, pickup ETA, surge e invariante de preço calculado no backend. Lock otimista é validado por inspeção do schema + manualmente via `docs/smoke-test.md` (não tem unit test possível sem Hibernate em runtime).
 - **Contrato HTTP publicado:** Swagger UI em `/swagger-ui.html`, OpenAPI JSON em `/v3/api-docs`. Bearer scheme global configurado via `OpenApiConfig`.
 - **Smoke test versionado:** `docs/api.http` + `docs/smoke-test.md` permitem validar release ponta-a-ponta em ~10 min.
 
