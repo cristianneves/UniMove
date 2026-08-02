@@ -19,6 +19,8 @@ import java.time.Instant;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -82,6 +84,39 @@ class AuthControllerWebMvcTest {
                         .content(json.writeValueAsString(req)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.fieldErrors").exists());
+    }
+
+    @Test
+    void registerAsAdminReturns400AndNeverReachesService() throws Exception {
+        RegisterRequest req = new RegisterRequest(
+                "hacker@example.com", "senha12345", "Invasor", null,
+                Role.ADMIN, "Campinas", null, null
+        );
+
+        mvc.perform(post("/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(req)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.fieldErrors").exists());
+
+        verify(authService, never()).register(any());
+    }
+
+    @Test
+    void registerWithUnknownRoleReturns400() throws Exception {
+        String unknownRoleJson = """
+                {"email":"x@example.com","password":"senha12345","name":"X",
+                 "role":"SUPERADMIN","cidade":"Campinas"}
+                """;
+
+        mvc.perform(post("/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(unknownRoleJson))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400));
+
+        verify(authService, never()).register(any());
     }
 
     @Test

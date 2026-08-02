@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -42,6 +43,11 @@ public class GlobalExceptionHandler {
                 fields.put(cv.getPropertyPath().toString(), cv.getMessage())
         );
         return build(HttpStatus.BAD_REQUEST, "Dados inválidos", req, fields);
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiError> handleUnreadable(HttpMessageNotReadableException ex, HttpServletRequest req) {
+        return build(HttpStatus.BAD_REQUEST, "Corpo da requisição inválido", req, null);
     }
 
     @ExceptionHandler(BadCredentialsException.class)

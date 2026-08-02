@@ -37,6 +37,11 @@ public class AuthService {
 
     @Transactional
     public AuthResponse register(RegisterRequest req) {
+        if (req.role() == Role.ADMIN) {
+            log.warn("Tentativa de auto-cadastro como ADMIN bloqueada: email={}", req.email());
+            throw new RoleNotSelfAssignableException();
+        }
+
         String email = req.email().trim().toLowerCase();
         if (userRepository.existsByEmail(email)) {
             throw new EmailAlreadyUsedException();
