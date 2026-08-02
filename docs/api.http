@@ -47,6 +47,19 @@ Content-Type: application/json
 
 > {% client.global.set("motoristaToken", response.body.token); %}
 
+### 1.2b Auto-cadastro como ADMIN e' rejeitado (esperado: 400 "Dados invalidos")
+# Escalacao de privilegio: nao ha como virar ADMIN pelo body. ADMIN so via seed/migration.
+POST {{host}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "invasor@unimove.local",
+  "password": "senha12345",
+  "name": "Invasor",
+  "role": "ADMIN",
+  "cidade": "sao-jose-do-rio-preto"
+}
+
 ### 1.3 Login admin (seed em V2__seed_admin.sql)
 # @name loginAdmin
 POST {{host}}/auth/login

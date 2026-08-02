@@ -125,8 +125,9 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 |-----------------------------|---------------|-------------|
 | Scaffold (pom, profiles)    | concluido     | Spring Boot 3.3.5 + Java 21 |
 | Schema (`V1`-`V18`)         | concluido     | users (com `status`), drivers, rides (com `@Version`, `share_token`, `route_geometry` e `surge_multiplier`), route_cache (com `geometry`), ride_ratings, saved_places, cancellation_fee, category, pricing_configs (com `surge_enabled`/`surge_cap`), chat_messages, ride_stops, geocode_cache |
-| `shared` (security, JWT, exception handler) | concluido | `GlobalExceptionHandler` cobre validacao, lock otimista, `BusinessException` |
+| `shared` (security, JWT, exception handler) | concluido | `GlobalExceptionHandler` cobre validacao, JSON ilegivel/enum invalido (400), lock otimista, `BusinessException` |
 | `domain.user`               | concluido     | `/auth/*`, online/offline, admin approve, `/saved-places`, denormalizacao de rating, **suspensao/reativacao via `/admin/users/*`** |
+| Auto-cadastro sem escalacao | concluido     | `POST /auth/register` aceita apenas `PASSAGEIRO` ou `MOTORISTA` — `ADMIN` no body devolve 400 (`@AssertTrue` no `RegisterRequest`) e a guarda em `AuthService.register` devolve 403. Admin so existe via seed/migration (`V2__seed_admin.sql`) |
 | `domain.maps`               | concluido     | `MapsService` + `OsrmMapsService` (cache-aside via `route_cache`, polyline pro mapa); `GeocodingService` + `PhotonGeocodingService` (busca de endereço/`reverse` via Photon, `geocode_cache`) |
 | `domain.payment`            | concluido     | `SimulatedPaymentService` — BR Code ficticio (sem PSP real) |
 | `domain.ride`               | concluido     | Criacao, estimate, mural por cidade+categoria, aceite (lock otimista), state machine, cancelamento com taxa, polling, rating bi, earnings, **share publico em `/share/{token}`** |
@@ -151,9 +152,10 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 
 ### Testes
 
-Cobertura atual (`mvn test`) — 14 classes, **127 testes**:
+Cobertura atual (`mvn test`) — 15 classes, **133 testes**:
 
-- `AuthControllerWebMvcTest` (MockMvc) — fluxos de register/login
+- `AuthControllerWebMvcTest` (MockMvc) — fluxos de register/login, `role: ADMIN` → 400 sem chegar ao service, role desconhecida → 400
+- `AuthServiceRegisterTest` (Mockito) — bloqueio de auto-cadastro como ADMIN antes de qualquer escrita, passageiro normalizado + token, motorista nasce `approved=false`, e-mail duplicado → 409
 - `AuthServiceLoginLockoutTest` — lockout após tentativas de login falhas
 - `LoginAttemptServiceTest` — janela/contagem do lockout
 - `JwtServiceTest` — emissao e validacao de token
@@ -168,6 +170,6 @@ Cobertura atual (`mvn test`) — 14 classes, **127 testes**:
 - `UserProfileServiceTest` — edição de perfil, troca de senha, re-emissão de JWT ao mudar cidade
 - `AdminMetricsServiceTest` (Mockito) — painel admin: derivação de `active`/taxas/ticket médio, defaulting do período (últimos 30 dias), range invertido → 400, agregado nulo → zeros
 
-Total: **127 testes** passando em segundos (JUnit 5 + Mockito, sem Docker/Postgres).
+Total: **133 testes** passando em segundos (JUnit 5 + Mockito, sem Docker/Postgres).
 
 > **Lock otimista:** não é exercitado em unit test (depende do `@Version` do Hibernate em runtime). A garantia vem do schema (`rides.version`) + tradução de `ObjectOptimisticLockingFailureException` para HTTP 409 no `GlobalExceptionHandler`. Valide manualmente via `docs/smoke-test.md` seção 5 (aceite por dois motoristas).
