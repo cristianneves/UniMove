@@ -23,6 +23,9 @@ public class AuthController {
     }
 
     @PostMapping("/register")
+    @Operation(summary = "Cadastra o usuário e emite o JWT",
+            description = "`role` aceita apenas `PASSAGEIRO` ou `MOTORISTA` — `ADMIN` é rejeitado com 400. "
+                    + "Contas ADMIN são criadas exclusivamente por seed/migration.")
     public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest req) {
         AuthResponse body = authService.register(req);
         return ResponseEntity.status(HttpStatus.CREATED).body(body);

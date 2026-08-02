@@ -18,6 +18,11 @@ public record RegisterRequest(
         VehicleType vehicleType,
         @Size(max = 10) String vehiclePlate
 ) {
+    @AssertTrue(message = "Cadastro permitido apenas para PASSAGEIRO ou MOTORISTA.")
+    public boolean isRoleSelfRegisterable() {
+        return role != Role.ADMIN;
+    }
+
     @AssertTrue(message = "Motorista deve informar vehicleType e vehiclePlate; outros papéis não devem.")
     public boolean isVehicleConsistent() {
         boolean isDriver = role == Role.MOTORISTA;
