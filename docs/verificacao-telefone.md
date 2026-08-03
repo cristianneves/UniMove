@@ -109,14 +109,99 @@ O link e o código saem no log e a validação de assinatura é pulada, então a
 
 ---
 
-## Ativando em produção
+## Ligando no WhatsApp real (teste)
 
-1. **Chip dedicado.** Um número que **não** esteja em uso em nenhum WhatsApp (pessoal ou Business) — registrá-lo na Cloud API o desvincula do app WhatsApp comum. Evite número reciclado com histórico.
-2. **Meta Business** → criar app do tipo Business em `developers.facebook.com` → adicionar o produto **WhatsApp**.
-3. Registrar o número na WhatsApp Business Account e concluir a verificação por SMS/ligação que a Meta faz uma vez.
-4. **Webhook**: apontar para `https://<host>/webhooks/whatsapp`, definir o *verify token* (mesmo valor de `WHATSAPP_WEBHOOK_VERIFY_TOKEN`) e assinar o campo **`messages`**. A Meta faz um `GET` de handshake — o backend já responde.
-5. Copiar o **App Secret** (Configurações → Básico) para `WHATSAPP_APP_SECRET`.
-6. Definir `PHONE_VERIFICATION_CHANNEL=WHATSAPP` e `WHATSAPP_BUSINESS_NUMBER`.
+**Não é preciso comprar chip para testar.** A Meta fornece um número de teste grátis, e no fluxo reverso o seu celular pessoal é o **remetente** — papel sem restrição alguma, que nunca é registrado na API.
+
+Cuidado com a ordem: a Meta valida a URL do webhook no momento em que você salva, então a aplicação precisa já estar no ar com o verify token configurado. Por isso o webhook é o passo 5, não o 1.
+
+### 1. Criar o app na Meta
+
+[developers.facebook.com/apps](https://developers.facebook.com/apps/) → **Criar app** → caso de uso *"Conectar-se a clientes via WhatsApp"* (tipo **Business**) → adicionar o produto **WhatsApp**.
+
+Requer uma conta no [Meta Business](https://business.facebook.com/). Não é preciso CNPJ nem verificação de negócio para o número de teste.
+
+### 2. Pegar o número de teste e liberar o seu celular
+
+No app, em **WhatsApp → Configuração da API**:
+
+- O campo *"De"* mostra o **número de teste**. Copie só os dígitos (E.164 sem `+`) — é o `WHATSAPP_BUSINESS_NUMBER`.
+- Em *"Para"* → **gerenciar lista de números** → adicione seu celular com DDI. A Meta manda um código para ele; confirme. Cabem até **5 números**.
+
+### 3. Copiar o App Secret
+
+**Configurações do app → Básico → Chave secreta do app → Mostrar**. É o `WHATSAPP_APP_SECRET`, usado para validar o HMAC do webhook.
+
+### 4. Expor a aplicação em HTTPS público
+
+A Meta exige TLS válido — `localhost` não serve e certificado autoassinado é recusado. Para teste local, um túnel efêmero:
+
+```powershell
+winget install --id Cloudflare.cloudflared
+cloudflared tunnel --url http://localhost:8080
+```
+
+Ele imprime uma URL `https://<algo>.trycloudflare.com`. Não exige conta.
+
+⚠️ **A URL muda a cada reinício do túnel** — e aí é preciso reeditar o webhook no painel da Meta. Para algo mais estável, use o deploy do Railway.
+
+Agora suba a aplicação com as variáveis:
+
+```powershell
+$env:PHONE_VERIFICATION_CHANNEL   = "WHATSAPP"
+$env:WHATSAPP_BUSINESS_NUMBER     = "15550001234"      # numero de teste, so digitos
+$env:WHATSAPP_APP_SECRET          = "<app secret>"
+$env:WHATSAPP_WEBHOOK_VERIFY_TOKEN= "unimove-webhook-2026"   # valor livre, voce inventa
+./mvnw.cmd spring-boot:run
+```
+
+Se faltar alguma variável, o startup falha dizendo qual — de propósito.
+
+### 5. Configurar o webhook
+
+Em **WhatsApp → Configuração → Webhook → Editar**:
+
+- **URL de callback:** `https://<algo>.trycloudflare.com/webhooks/whatsapp`
+- **Token de verificação:** exatamente o valor de `WHATSAPP_WEBHOOK_VERIFY_TOKEN`
+- **Verificar e salvar** → a Meta dispara o `GET` de handshake; o backend responde sozinho.
+
+Depois, em **Gerenciar** os campos do webhook, **assine o campo `messages`**. Sem isso a URL fica configurada mas nenhuma mensagem chega — é o erro mais comum.
+
+Deixe o app em **modo Live** (chave no topo do painel): em modo Dev parte dos webhooks não é entregue.
+
+### 6. Testar
+
+```powershell
+curl.exe -X POST http://localhost:8080/auth/phone/challenge
+```
+
+Abra o `waLink` retornado no celular que você liberou no passo 2, envie a mensagem, e consulte:
+
+```powershell
+curl.exe http://localhost:8080/auth/phone/challenge/<challengeId>
+```
+
+Deve vir `VERIFIED` com o `verificationToken` e o seu telefone mascarado.
+
+### Diagnóstico
+
+| Sintoma | Causa provável |
+|---|---|
+| Salvar o webhook falha | App fora do ar, túnel caído, ou verify token diferente |
+| Webhook salvo mas status fica `PENDING` | Campo `messages` não assinado, ou app em modo Dev |
+| Backend loga "assinatura invalida" | `WHATSAPP_APP_SECRET` errado |
+| Status vira `REJECTED`/`PHONE_IN_USE` | Aquele número já tem conta — comportamento correto |
+
+---
+
+## Produção
+
+Trocar o número de teste por um **chip dedicado**, porque o de teste só conversa com os 5 números da allow-list.
+
+- O chip **não** pode estar em uso em nenhum WhatsApp (pessoal ou Business): registrar na Cloud API desvincula o número do app comum, e o histórico se perde. Nunca use o número pessoal aqui.
+- Evite número reciclado com histórico prévio no WhatsApp.
+- Registre-o na WhatsApp Business Account e conclua a verificação por SMS/ligação.
+- Aponte o webhook para a URL do Railway em vez do túnel.
 
 Não é preciso criar template algum, e os limites de mensagens da Meta não se aplicam: eles restringem conversas **iniciadas pela empresa**, e nós não iniciamos nenhuma.
 
