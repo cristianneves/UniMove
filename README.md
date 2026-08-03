@@ -103,6 +103,12 @@ com.unimove
 | `OSRM_BASE_URL`       | `https://router.project-osrm.org`  | nao         |
 | `PHOTON_BASE_URL`     | `https://photon.komoot.io`         | nao         |
 | `SPRING_PROFILES_ACTIVE` | `dev`                           | nao         |
+| `PHONE_VERIFICATION_CHANNEL` | `LOG`                       | nao — use `WHATSAPP` em producao |
+| `WHATSAPP_BUSINESS_NUMBER` | —                             | so com `channel=WHATSAPP` |
+| `WHATSAPP_APP_SECRET` | —                                  | so com `channel=WHATSAPP` |
+| `WHATSAPP_WEBHOOK_VERIFY_TOKEN` | —                        | so com `channel=WHATSAPP` |
+
+Com `PHONE_VERIFICATION_CHANNEL=WHATSAPP` e credencial faltando, o startup falha de proposito. Ver `docs/verificacao-telefone.md`.
 
 Veja `.env.example` para o template completo.
 
@@ -124,10 +130,11 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 | Bloco                       | Status        | Observacoes |
 |-----------------------------|---------------|-------------|
 | Scaffold (pom, profiles)    | concluido     | Spring Boot 3.3.5 + Java 21 |
-| Schema (`V1`-`V18`)         | concluido     | users (com `status`), drivers, rides (com `@Version`, `share_token`, `route_geometry` e `surge_multiplier`), route_cache (com `geometry`), ride_ratings, saved_places, cancellation_fee, category, pricing_configs (com `surge_enabled`/`surge_cap`), chat_messages, ride_stops, geocode_cache |
+| Schema (`V1`-`V19`)         | concluido     | users (com `status`, `phone_verified_at` e telefone unico), phone_verifications, drivers, rides (com `@Version`, `share_token`, `route_geometry` e `surge_multiplier`), route_cache (com `geometry`), ride_ratings, saved_places, cancellation_fee, category, pricing_configs (com `surge_enabled`/`surge_cap`), chat_messages, ride_stops, geocode_cache |
 | `shared` (security, JWT, exception handler) | concluido | `GlobalExceptionHandler` cobre validacao, JSON ilegivel/enum invalido (400), lock otimista, `BusinessException` |
 | `domain.user`               | concluido     | `/auth/*`, online/offline, admin approve, `/saved-places`, denormalizacao de rating, **suspensao/reativacao via `/admin/users/*`** |
 | Auto-cadastro sem escalacao | concluido     | `POST /auth/register` aceita apenas `PASSAGEIRO` ou `MOTORISTA` — `ADMIN` no body devolve 400 (`@AssertTrue` no `RegisterRequest`) e a guarda em `AuthService.register` devolve 403. Admin so existe via seed/migration (`V2__seed_admin.sql`) |
+| Verificacao de telefone     | concluido     | `domain.verification` — cadastro exige posse do numero, provada por fluxo reverso na WhatsApp Cloud API (`/auth/phone/*` + `/webhooks/whatsapp`). Custo R$0 permanente: nunca enviamos mensagem, e o telefone da conta vem do `wa_id` que a Meta entrega, nao do formulario. Ver `docs/verificacao-telefone.md` |
 | `domain.maps`               | concluido     | `MapsService` + `OsrmMapsService` (cache-aside via `route_cache`, polyline pro mapa); `GeocodingService` + `PhotonGeocodingService` (busca de endereço/`reverse` via Photon, `geocode_cache`) |
 | `domain.payment`            | concluido     | `SimulatedPaymentService` — BR Code ficticio (sem PSP real) |
 | `domain.ride`               | concluido     | Criacao, estimate, mural por cidade+categoria, aceite (lock otimista), state machine, cancelamento com taxa, polling, rating bi, earnings, **share publico em `/share/{token}`** |

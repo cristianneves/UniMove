@@ -8,12 +8,59 @@
 @adminToken =
 @rideId =
 @driverId =
+@challengeId =
+@challengeCode =
+@verificationToken =
+
+###############################################################
+# 0. VERIFICACAO DE TELEFONE (obrigatoria antes de cadastrar)
+###############################################################
+# Fluxo reverso: quem envia a mensagem e o USUARIO, nao o backend. Por isso
+# custa R$0 na Cloud API — so template enviado pela empresa e cobrado.
+# Em dev (app.phone-verification.channel=LOG) o link e o codigo saem no log e
+# a Meta e simulada pelo passo 0.2.
+
+### 0.1 Criar desafio (publico, sem body)
+# @name challengePassageiro
+POST {{host}}/auth/phone/challenge
+
+> {%
+    client.global.set("challengeId", response.body.challengeId);
+    client.global.set("challengeCode", response.body.code);
+%}
+
+### 0.2 Simular a Meta entregando a mensagem do usuario
+# Em producao quem chama isto e a Meta, com X-Hub-Signature-256 assinado.
+# O telefone da conta vem do campo "from" — nunca de um campo do formulario.
+POST {{host}}/webhooks/whatsapp
+Content-Type: application/json
+
+{
+  "object": "whatsapp_business_account",
+  "entry": [{
+    "changes": [{
+      "value": {
+        "messages": [{
+          "from": "5517999990001",
+          "type": "text",
+          "text": { "body": "UNIMOVE-{{challengeCode}}" }
+        }]
+      }
+    }]
+  }]
+}
+
+### 0.3 Polling do status (app chama a cada ~2s ate sair de PENDING)
+# @name challengeStatus
+GET {{host}}/auth/phone/challenge/{{challengeId}}
+
+> {% client.global.set("verificationToken", response.body.verificationToken); %}
 
 ###############################################################
 # 1. AUTH
 ###############################################################
 
-### 1.1 Registrar passageiro
+### 1.1 Registrar passageiro (exige o token do passo 0.3)
 # @name registerPassageiro
 POST {{host}}/auth/register
 Content-Type: application/json
@@ -22,7 +69,7 @@ Content-Type: application/json
   "email": "passageiro1@unimove.local",
   "password": "senha12345",
   "name": "Passageiro Um",
-  "phone": "+5517999990001",
+  "verificationToken": "{{verificationToken}}",
   "role": "PASSAGEIRO",
   "cidade": "sao-jose-do-rio-preto"
 }
@@ -30,6 +77,8 @@ Content-Type: application/json
 > {% client.global.set("passageiroToken", response.body.token); %}
 
 ### 1.2 Registrar motorista (vai entrar como approved=false)
+# Refaca 0.1 -> 0.2 (com outro "from") -> 0.3 antes deste passo: cada conta
+# precisa do proprio telefone verificado, e o token e de uso unico.
 # @name registerMotorista
 POST {{host}}/auth/register
 Content-Type: application/json
@@ -38,7 +87,7 @@ Content-Type: application/json
   "email": "motorista1@unimove.local",
   "password": "senha12345",
   "name": "Motorista Um",
-  "phone": "+5517999990002",
+  "verificationToken": "{{verificationToken}}",
   "role": "MOTORISTA",
   "cidade": "sao-jose-do-rio-preto",
   "vehicleType": "MOTO",
@@ -56,7 +105,33 @@ Content-Type: application/json
   "email": "invasor@unimove.local",
   "password": "senha12345",
   "name": "Invasor",
+  "verificationToken": "{{verificationToken}}",
   "role": "ADMIN",
+  "cidade": "sao-jose-do-rio-preto"
+}
+
+### 1.2c Cadastro sem verificacao de telefone (esperado: 400)
+POST {{host}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "semtelefone@unimove.local",
+  "password": "senha12345",
+  "name": "Sem Telefone",
+  "role": "PASSAGEIRO",
+  "cidade": "sao-jose-do-rio-preto"
+}
+
+### 1.2d Reuso do mesmo verificationToken (esperado: 400 — uso unico)
+POST {{host}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "reuso@unimove.local",
+  "password": "senha12345",
+  "name": "Reuso",
+  "verificationToken": "{{verificationToken}}",
+  "role": "PASSAGEIRO",
   "cidade": "sao-jose-do-rio-preto"
 }
 
