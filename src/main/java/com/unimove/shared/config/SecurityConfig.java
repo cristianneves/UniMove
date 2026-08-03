@@ -39,6 +39,9 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
                                 "/auth/**",
+                                // Chamado pela Meta, nao por um usuario logado. A autenticacao
+                                // e a assinatura HMAC do payload, conferida no proprio controller.
+                                "/webhooks/whatsapp",
                                 "/share/**",
                                 "/actuator/health",
                                 "/v3/api-docs/**",

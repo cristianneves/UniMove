@@ -38,6 +38,10 @@ public class User {
     @Column(name = "phone", length = 20)
     private String phone;
 
+    /** Preenchido no cadastro, com o instante em que a Meta confirmou a posse do numero. */
+    @Column(name = "phone_verified_at")
+    private Instant phoneVerifiedAt;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "role", nullable = false, length = 20)
     private Role role;

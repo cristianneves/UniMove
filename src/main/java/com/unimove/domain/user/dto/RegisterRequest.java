@@ -8,11 +8,16 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
+/**
+ * Nao ha campo {@code phone}: o telefone da conta vem do desafio verificado no
+ * WhatsApp (o wa_id que a Meta entrega), nunca do formulario. E o que impede
+ * alguem de cadastrar o numero de outra pessoa.
+ */
 public record RegisterRequest(
         @Email @NotBlank String email,
         @NotBlank @Size(min = 8, max = 72) String password,
         @NotBlank @Size(max = 120) String name,
-        @Size(max = 20) String phone,
+        @NotBlank @Size(max = 64) String verificationToken,
         @NotNull Role role,
         @NotBlank @Size(max = 80) String cidade,
         VehicleType vehicleType,

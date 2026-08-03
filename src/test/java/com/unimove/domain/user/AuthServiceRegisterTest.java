@@ -2,17 +2,21 @@ package com.unimove.domain.user;
 
 import com.unimove.domain.user.dto.AuthResponse;
 import com.unimove.domain.user.dto.RegisterRequest;
+import com.unimove.domain.verification.PhoneVerificationRequiredException;
+import com.unimove.domain.verification.PhoneVerificationService;
 import com.unimove.shared.security.JwtService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -23,22 +27,35 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Testes de {@link AuthService#register}, com foco na guarda que impede
- * auto-cadastro como ADMIN (escalação de privilégio via body da requisição).
+ * Testes de {@link AuthService#register}: a guarda contra auto-cadastro como
+ * ADMIN e a exigência de telefone verificado no WhatsApp.
  */
 @ExtendWith(MockitoExtension.class)
 class AuthServiceRegisterTest {
+
+    private static final Instant NOW = Instant.parse("2026-08-03T12:00:00Z");
+    private static final String TOKEN = "token-verificado";
+    /** Telefone como a Meta entrega: E.164 sem '+'. */
+    private static final String VERIFIED_PHONE = "5574999990000";
 
     @Mock UserRepository userRepository;
     @Mock DriverRepository driverRepository;
     @Mock PasswordEncoder passwordEncoder;
     @Mock JwtService jwtService;
     @Mock LoginAttemptService loginAttemptService;
+    @Mock PhoneVerificationService phoneVerificationService;
 
-    @InjectMocks AuthService service;
+    private AuthService service;
+
+    @BeforeEach
+    void setUp() {
+        // Clock fixo para poder asseverar phoneVerifiedAt.
+        service = new AuthService(userRepository, driverRepository, passwordEncoder, jwtService,
+                loginAttemptService, phoneVerificationService, Clock.fixed(NOW, ZoneOffset.UTC));
+    }
 
     private static RegisterRequest request(Role role, VehicleType vehicleType, String plate) {
-        return new RegisterRequest("novo@example.com", "senha12345", "  Maria Silva  ", "77999990000",
+        return new RegisterRequest("novo@example.com", "senha12345", "  Maria Silva  ", TOKEN,
                 role, "Remanso", vehicleType, plate);
     }
 
@@ -52,13 +69,15 @@ class AuthServiceRegisterTest {
         verify(userRepository, never()).save(any());
         verify(driverRepository, never()).save(any());
         verify(jwtService, never()).generate(any());
+        verify(phoneVerificationService, never()).consumeVerifiedPhone(anyString());
     }
 
     @Test
-    @DisplayName("passageiro é salvo, normalizado e recebe o token")
+    @DisplayName("passageiro é salvo com o telefone verificado e recebe o token")
     void registerPassageiroSavesUserAndIssuesToken() {
         when(userRepository.existsByEmail("novo@example.com")).thenReturn(false);
         when(passwordEncoder.encode("senha12345")).thenReturn("hash");
+        when(phoneVerificationService.consumeVerifiedPhone(TOKEN)).thenReturn(VERIFIED_PHONE);
         when(jwtService.generate(any()))
                 .thenReturn(new JwtService.IssuedToken("jwt", Instant.now().plusSeconds(3600)));
 
@@ -71,6 +90,8 @@ class AuthServiceRegisterTest {
         assertThat(saved.getName()).isEqualTo("Maria Silva");
         assertThat(saved.getPasswordHash()).isEqualTo("hash");
         assertThat(saved.getCidade()).isEqualTo("remanso");
+        assertThat(saved.getPhone()).isEqualTo(VERIFIED_PHONE);
+        assertThat(saved.getPhoneVerifiedAt()).isEqualTo(NOW);
 
         assertThat(resp.token()).isEqualTo("jwt");
         assertThat(resp.role()).isEqualTo(Role.PASSAGEIRO);
@@ -82,6 +103,7 @@ class AuthServiceRegisterTest {
     void registerMotoristaCreatesPendingDriver() {
         when(userRepository.existsByEmail("novo@example.com")).thenReturn(false);
         when(passwordEncoder.encode("senha12345")).thenReturn("hash");
+        when(phoneVerificationService.consumeVerifiedPhone(TOKEN)).thenReturn(VERIFIED_PHONE);
         when(jwtService.generate(any()))
                 .thenReturn(new JwtService.IssuedToken("jwt", Instant.now().plusSeconds(3600)));
 
@@ -97,7 +119,7 @@ class AuthServiceRegisterTest {
     }
 
     @Test
-    @DisplayName("e-mail já cadastrado devolve conflito")
+    @DisplayName("e-mail já cadastrado devolve conflito sem consumir a verificação")
     void registerWithExistingEmailThrows() {
         when(userRepository.existsByEmail("novo@example.com")).thenReturn(true);
 
@@ -105,5 +127,22 @@ class AuthServiceRegisterTest {
                 .isInstanceOf(EmailAlreadyUsedException.class);
 
         verify(userRepository, never()).save(any());
+        // Sem consumir o token, o usuário corrige o e-mail sem reverificar o telefone.
+        verify(phoneVerificationService, never()).consumeVerifiedPhone(anyString());
+    }
+
+    @Test
+    @DisplayName("token de verificação inválido impede o cadastro")
+    void registerWithInvalidVerificationTokenThrows() {
+        when(userRepository.existsByEmail("novo@example.com")).thenReturn(false);
+        when(phoneVerificationService.consumeVerifiedPhone(TOKEN))
+                .thenThrow(new PhoneVerificationRequiredException());
+
+        assertThatThrownBy(() -> service.register(request(Role.PASSAGEIRO, null, null)))
+                .isInstanceOf(PhoneVerificationRequiredException.class);
+
+        verify(userRepository, never()).save(any());
+        verify(driverRepository, never()).save(any());
+        verify(jwtService, never()).generate(any());
     }
 }

@@ -56,6 +56,7 @@ class UserProfileServiceTest {
         user.setEmail("p@example.com");
         user.setPasswordHash("hash-antigo");
         user.setName("Maria Silva");
+        user.setPhone("5574999990000");
         user.setRole(Role.PASSAGEIRO);
         user.setCidade("remanso");
 
@@ -165,10 +166,9 @@ class UserProfileServiceTest {
         when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
 
         UpdateProfileResponse resp = service.updateProfile(auth,
-                new UpdateProfileRequest("  Maria S. Silva  ", "  ", "Remanso"));
+                new UpdateProfileRequest("  Maria S. Silva  ", "Remanso"));
 
         assertThat(user.getName()).isEqualTo("Maria S. Silva");
-        assertThat(user.getPhone()).isNull();
         assertThat(user.getCidade()).isEqualTo("remanso");
         assertThat(resp.token()).isNull();
         assertThat(resp.tokenExpiresAt()).isNull();
@@ -183,10 +183,11 @@ class UserProfileServiceTest {
         when(jwtService.generate(user)).thenReturn(new JwtService.IssuedToken("novo-jwt", expires));
 
         UpdateProfileResponse resp = service.updateProfile(auth,
-                new UpdateProfileRequest("Maria Silva", "(74) 99999-0000", "Casa Nova"));
+                new UpdateProfileRequest("Maria Silva", "Casa Nova"));
 
         assertThat(user.getCidade()).isEqualTo("casa-nova");
-        assertThat(user.getPhone()).isEqualTo("(74) 99999-0000");
+        // Telefone verificado no cadastro permanece intocado — o perfil não o edita.
+        assertThat(user.getPhone()).isEqualTo("5574999990000");
         assertThat(resp.token()).isEqualTo("novo-jwt");
         assertThat(resp.tokenExpiresAt()).isEqualTo(expires);
         assertThat(resp.profile().cidade()).isEqualTo("casa-nova");
@@ -198,7 +199,7 @@ class UserProfileServiceTest {
         when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
 
         assertThatThrownBy(() -> service.updateProfile(auth,
-                new UpdateProfileRequest("Maria Silva", null, "!!!")))
+                new UpdateProfileRequest("Maria Silva", "!!!")))
                 .isInstanceOf(InvalidCityException.class);
 
         assertThat(user.getCidade()).isEqualTo("remanso");

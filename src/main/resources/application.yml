@@ -36,6 +36,19 @@ app:
       max-attempts: ${LOGIN_LOCKOUT_MAX_ATTEMPTS:5}
       lockout-minutes: ${LOGIN_LOCKOUT_MINUTES:15}
       cleanup-interval-ms: ${LOGIN_LOCKOUT_CLEANUP_INTERVAL_MS:600000}
+  phone-verification:
+    # LOG = dev/testes (link e codigo saem no log, webhook aceita POST manual).
+    # WHATSAPP = producao; exige app.whatsapp.* preenchido ou o startup falha.
+    channel: ${PHONE_VERIFICATION_CHANNEL:LOG}
+    challenge-ttl-minutes: ${PHONE_CHALLENGE_TTL_MINUTES:10}
+    token-ttl-minutes: ${PHONE_TOKEN_TTL_MINUTES:15}
+    max-challenges-per-ip-hour: ${PHONE_MAX_CHALLENGES_PER_IP_HOUR:20}
+    purge-interval-ms: ${PHONE_VERIFICATION_PURGE_INTERVAL_MS:600000}
+  whatsapp:
+    # Numero da UniMove em E.164 sem '+'. So usado com channel=WHATSAPP.
+    business-number: ${WHATSAPP_BUSINESS_NUMBER:}
+    app-secret: ${WHATSAPP_APP_SECRET:}
+    webhook-verify-token: ${WHATSAPP_WEBHOOK_VERIFY_TOKEN:}
   driver:
     presence:
       # Motorista online sem nenhum request ha mais que offline-after-minutes e marcado offline pelo sistema.
