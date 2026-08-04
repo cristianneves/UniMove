@@ -1,14 +1,33 @@
+# Stack de producao — roda na VPS em /opt/unimove.
+#
+# A imagem NAO e compilada aqui: vem pronta do GHCR, publicada pelo
+# .github/workflows/deploy.yml. Quem orquestra o deploy e o scripts/deploy.sh.
+#
+# Segredos vivem em /opt/unimove/.env (chmod 600), nunca no GitHub.
+# Ver docs/deploy-vps.md.
+
+# Sem limite, o json-file cresce sem parar e enche o disco de uma VPS que
+# ninguem visita. 30 MB por servico ja da historico de sobra pra depurar.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   postgres:
     image: postgres:16-alpine
     container_name: unimove-postgres-prod
     restart: always
+    logging: *default-logging
     environment:
       POSTGRES_DB: unimove
       POSTGRES_USER: unimove
-      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?defina DATABASE_PASSWORD no .env}
     volumes:
       - unimove_pgdata_prod:/var/lib/postgresql/data
+    # Loopback apenas — o banco nunca fica exposto na internet.
+    # Para inspecionar de fora: ssh -L 5432:127.0.0.1:5432 <vps>
     ports:
       - "127.0.0.1:5432:5432"
     healthcheck:
@@ -18,25 +37,68 @@ services:
       retries: 5
 
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/cristianneves/unimove:${IMAGE_TAG:-latest}
     container_name: unimove-api-prod
     restart: always
+    logging: *default-logging
     depends_on:
       postgres:
         condition: service_healthy
+    # Trava a JVM em 2 GB. Sem isso o MaxRAMPercentage=75 do Dockerfile miraria
+    # 75% dos 24 GB do host e o heap cresceria sem necessidade.
+    mem_limit: 2g
     environment:
       SPRING_PROFILES_ACTIVE: prod
       SERVER_PORT: 8080
       DATABASE_URL: jdbc:postgresql://postgres:5432/unimove
       DATABASE_USER: unimove
-      DATABASE_PASSWORD: ${DATABASE_PASSWORD}
-      JWT_SECRET: ${JWT_SECRET}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?defina DATABASE_PASSWORD no .env}
+      JWT_SECRET: ${JWT_SECRET:?defina JWT_SECRET no .env (openssl rand -base64 48)}
       JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
+      # --- Verificacao de telefone (WhatsApp Cloud API) ---
+      PHONE_VERIFICATION_CHANNEL: ${PHONE_VERIFICATION_CHANNEL:-LOG}
+      WHATSAPP_BUSINESS_NUMBER: ${WHATSAPP_BUSINESS_NUMBER:-}
+      WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET:-}
+      WHATSAPP_WEBHOOK_VERIFY_TOKEN: ${WHATSAPP_WEBHOOK_VERIFY_TOKEN:-}
+      # --- Login social ---
+      GOOGLE_LOGIN_ENABLED: ${GOOGLE_LOGIN_ENABLED:-false}
+      GOOGLE_CLIENT_IDS: ${GOOGLE_CLIENT_IDS:-}
+      # --- Mapas ---
       OSRM_BASE_URL: ${OSRM_BASE_URL:-https://router.project-osrm.org}
+      PHOTON_BASE_URL: ${PHOTON_BASE_URL:-https://photon.komoot.io}
+    # Loopback: quem publica na internet e o Caddy. O deploy.sh usa esta porta
+    # para o health check local.
     ports:
       - "127.0.0.1:8080:8080"
+    healthcheck:
+      # A imagem e alpine: wget vem do busybox, curl nao existe.
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: unimove-caddy-prod
+    restart: always
+    logging: *default-logging
+    depends_on:
+      - api
+    environment:
+      # Trocar DuckDNS por dominio proprio = mudar esta linha no .env.
+      DOMAIN: "${DOMAIN:?defina DOMAIN no .env, ex unimove.duckdns.org}"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Persistem os certificados Let's Encrypt. Sem isso, cada deploy pediria
+      # um certificado novo e bateria no rate limit da LE (5/semana por dominio).
+      - caddy_data:/data
+      - caddy_config:/config
 
 volumes:
   unimove_pgdata_prod:
+  caddy_data:
+  caddy_config:
