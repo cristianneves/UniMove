@@ -108,7 +108,10 @@ com.unimove
 | `WHATSAPP_APP_SECRET` | —                                  | so com `channel=WHATSAPP` |
 | `WHATSAPP_WEBHOOK_VERIFY_TOKEN` | —                        | so com `channel=WHATSAPP` |
 
-Com `PHONE_VERIFICATION_CHANNEL=WHATSAPP` e credencial faltando, o startup falha de proposito. Ver `docs/verificacao-telefone.md`.
+Nenhuma das variaveis de WhatsApp e necessaria para desenvolver: o default `channel=LOG` roda o fluxo
+completo de verificacao localmente, sem conta na Meta e sem tunel (ver secao 0 de `docs/api.http`).
+Elas so entram quando se liga o canal real, e ai `channel=WHATSAPP` com credencial faltando derruba o
+startup de proposito. Ver `docs/verificacao-telefone.md`.
 
 Veja `.env.example` para o template completo.
 
@@ -134,7 +137,7 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 | `shared` (security, JWT, exception handler) | concluido | `GlobalExceptionHandler` cobre validacao, JSON ilegivel/enum invalido (400), lock otimista, `BusinessException` |
 | `domain.user`               | concluido     | `/auth/*`, online/offline, admin approve, `/saved-places`, denormalizacao de rating, **suspensao/reativacao via `/admin/users/*`** |
 | Auto-cadastro sem escalacao | concluido     | `POST /auth/register` aceita apenas `PASSAGEIRO` ou `MOTORISTA` — `ADMIN` no body devolve 400 (`@AssertTrue` no `RegisterRequest`) e a guarda em `AuthService.register` devolve 403. Admin so existe via seed/migration (`V2__seed_admin.sql`) |
-| Verificacao de telefone     | concluido     | `domain.verification` — cadastro exige posse do numero, provada por fluxo reverso na WhatsApp Cloud API (`/auth/phone/*` + `/webhooks/whatsapp`). Custo R$0 permanente: nunca enviamos mensagem, e o telefone da conta vem do `wa_id` que a Meta entrega, nao do formulario. Ver `docs/verificacao-telefone.md` |
+| Verificacao de telefone     | concluido     | `domain.verification` — cadastro exige posse do numero, provada por fluxo reverso na WhatsApp Cloud API (`/auth/phone/*` + `/webhooks/whatsapp`). Custo R$0 permanente: nunca enviamos mensagem, e o telefone da conta vem do `wa_id` que a Meta entrega, nao do formulario. **Validado ponta a ponta com WhatsApp real em 03/08/2026.** Para desenvolver nao e preciso configurar nada (`channel=LOG` e o default) — ver `docs/verificacao-telefone.md` |
 | `domain.maps`               | concluido     | `MapsService` + `OsrmMapsService` (cache-aside via `route_cache`, polyline pro mapa); `GeocodingService` + `PhotonGeocodingService` (busca de endereço/`reverse` via Photon, `geocode_cache`) |
 | `domain.payment`            | concluido     | `SimulatedPaymentService` — BR Code ficticio (sem PSP real) |
 | `domain.ride`               | concluido     | Criacao, estimate, mural por cidade+categoria, aceite (lock otimista), state machine, cancelamento com taxa, polling, rating bi, earnings, **share publico em `/share/{token}`** |

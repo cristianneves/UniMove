@@ -17,8 +17,13 @@
 ###############################################################
 # Fluxo reverso: quem envia a mensagem e o USUARIO, nao o backend. Por isso
 # custa R$0 na Cloud API — so template enviado pela empresa e cobrado.
-# Em dev (app.phone-verification.channel=LOG) o link e o codigo saem no log e
-# a Meta e simulada pelo passo 0.2.
+#
+# PARA DESENVOLVER NAO E PRECISO CONFIGURAR NADA: channel=LOG e o default,
+# entao basta `docker compose up -d postgres` + `./mvnw spring-boot:run`.
+# O passo 0.2 abaixo faz o papel da Meta (em LOG a assinatura nao e exigida),
+# e o backend nao distingue esse POST de uma entrega real.
+# Contexto completo — inclusive como ligar o WhatsApp de verdade — em
+# docs/verificacao-telefone.md
 
 ### 0.1 Criar desafio (publico, sem body)
 # @name challengePassageiro
