@@ -107,6 +107,27 @@ Com `channel=WHATSAPP` e credencial faltando, o **startup falha** — mesma post
 
 O link e o código saem no log e a validação de assinatura é pulada, então a Meta é simulada por um POST manual. O caminho exercitado é o real — o mesmo controller, o mesmo serviço. Ver seção 0 de [`api.http`](api.http).
 
+**Este é o padrão, e é o que todo dev deve usar.** Sem conta na Meta, sem túnel, sem chip: `./mvnw spring-boot:run` e o fluxo completo funciona local. Só quem for mexer na integração com a Meta precisa do resto deste documento.
+
+### Trabalhando em equipe
+
+**Cada app da Meta tem uma única URL de callback** — dois devs não conseguem apontar para o mesmo app sem um sobrescrever o outro. Quem precisar testar a integração real deve criar o **próprio app + número de teste** (grátis), o que dá uma WABA isolada. Cada um precisa refazer o passo 5b na sua própria WABA.
+
+Para não reconfigurar o webhook a cada sessão, use uma URL estável em vez do túnel efêmero:
+
+| Opção | URL fixa | Custo | Ressalva |
+|---|---|---|---|
+| **ngrok** (1 domínio estático no plano free) | sim | grátis | 20k req/mês, 1 GB; o interstício de navegador não afeta webhook |
+| Cloudflare Tunnel nomeado | sim | grátis | exige domínio próprio na Cloudflare |
+| `cloudflared tunnel --url` (quick) | **não** | grátis | URL nova a cada início — só para teste pontual |
+
+```powershell
+ngrok config add-authtoken <token>
+ngrok http --url=seu-nome.ngrok-free.dev 8080
+```
+
+Com domínio estático, o webhook é configurado na Meta **uma vez** e sobrevive a reinícios. Para validação de integração do time, o caminho mais simples é o deploy de staging, que já tem URL fixa e não depende da máquina de ninguém.
+
 ---
 
 ## Ligando no WhatsApp real (teste)
