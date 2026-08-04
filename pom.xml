@@ -54,6 +54,14 @@
             <artifactId>spring-boot-starter-webflux</artifactId>
         </dependency>
 
+        <!-- Actuator: expoe /actuator/health, usado pelo healthcheck do container
+             e pelo deploy (scripts/deploy.sh faz rollback se nao ficar UP).
+             Em prod so o endpoint 'health' e exposto (application-prod.yml). -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
         <!-- PostgreSQL driver (runtime) -->
         <dependency>
             <groupId>org.postgresql</groupId>
