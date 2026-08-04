@@ -86,6 +86,7 @@ com.unimove
 - **Estado atual:** [`docs/estado-atual-projeto.md`](./docs/estado-atual-projeto.md) — snapshot do que existe e do fluxo ponta-a-ponta.
 - **Visão geral e fluxo no Swagger:** [`docs/visao-geral-e-fluxo-swagger.md`](./docs/visao-geral-e-fluxo-swagger.md) — porquê de cada decisão de MVP + roteiro completo.
 - **Painel de métricas (admin):** [`docs/admin-metrics.md`](./docs/admin-metrics.md) — contrato do `GET /admin/metrics`.
+- **Login social:** [`docs/login-social-google.md`](./docs/login-social-google.md) — fluxo de ID Token, vinculação de contas e configuração no Google Cloud.
 - **Surge pricing:** [`docs/plano-surge-pricing.md`](./docs/plano-surge-pricing.md) — spec do preço dinâmico por demanda.
 - **Análise/roadmap:** [`docs/analise-mvp.md`](./docs/analise-mvp.md) — lacunas priorizadas para o piloto real.
 
@@ -107,11 +108,19 @@ com.unimove
 | `WHATSAPP_BUSINESS_NUMBER` | —                             | so com `channel=WHATSAPP` |
 | `WHATSAPP_APP_SECRET` | —                                  | so com `channel=WHATSAPP` |
 | `WHATSAPP_WEBHOOK_VERIFY_TOKEN` | —                        | so com `channel=WHATSAPP` |
+| `GOOGLE_LOGIN_ENABLED` | `false`                           | nao — `true` liga `/auth/social` |
+| `GOOGLE_CLIENT_IDS`   | —                                  | so com `GOOGLE_LOGIN_ENABLED=true` |
+| `GOOGLE_JWK_SET_URI`  | JWKS do Google                     | nao         |
 
 Nenhuma das variaveis de WhatsApp e necessaria para desenvolver: o default `channel=LOG` roda o fluxo
 completo de verificacao localmente, sem conta na Meta e sem tunel (ver secao 0 de `docs/api.http`).
 Elas so entram quando se liga o canal real, e ai `channel=WHATSAPP` com credencial faltando derruba o
 startup de proposito. Ver `docs/verificacao-telefone.md`.
+
+O mesmo vale para o login social: com `GOOGLE_LOGIN_ENABLED=false` (default) nenhum bean nasce e
+`/auth/social` responde 503 — nao e preciso credencial do Google para desenvolver. `GOOGLE_CLIENT_IDS`
+e uma **lista** separada por virgula porque o claim `aud` do `id_token` muda por plataforma (Android com
+`serverClientId` devolve o client ID web; iOS devolve o client ID iOS). Ver `docs/login-social-google.md`.
 
 Veja `.env.example` para o template completo.
 
@@ -133,10 +142,11 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 | Bloco                       | Status        | Observacoes |
 |-----------------------------|---------------|-------------|
 | Scaffold (pom, profiles)    | concluido     | Spring Boot 3.3.5 + Java 21 |
-| Schema (`V1`-`V19`)         | concluido     | users (com `status`, `phone_verified_at` e telefone unico), phone_verifications, drivers, rides (com `@Version`, `share_token`, `route_geometry` e `surge_multiplier`), route_cache (com `geometry`), ride_ratings, saved_places, cancellation_fee, category, pricing_configs (com `surge_enabled`/`surge_cap`), chat_messages, ride_stops, geocode_cache |
+| Schema (`V1`-`V20`)         | concluido     | users (com `status`, `phone_verified_at`, telefone unico e `password_hash` nullable p/ conta social), social_identities, phone_verifications, drivers, rides (com `@Version`, `share_token`, `route_geometry` e `surge_multiplier`), route_cache (com `geometry`), ride_ratings, saved_places, cancellation_fee, category, pricing_configs (com `surge_enabled`/`surge_cap`), chat_messages, ride_stops, geocode_cache |
 | `shared` (security, JWT, exception handler) | concluido | `GlobalExceptionHandler` cobre validacao, JSON ilegivel/enum invalido (400), lock otimista, `BusinessException` |
 | `domain.user`               | concluido     | `/auth/*`, online/offline, admin approve, `/saved-places`, denormalizacao de rating, **suspensao/reativacao via `/admin/users/*`** |
 | Auto-cadastro sem escalacao | concluido     | `POST /auth/register` aceita apenas `PASSAGEIRO` ou `MOTORISTA` — `ADMIN` no body devolve 400 (`@AssertTrue` no `RegisterRequest`) e a guarda em `AuthService.register` devolve 403. Admin so existe via seed/migration (`V2__seed_admin.sql`) |
+| Login social (Google)       | concluido     | `POST /auth/social` + `POST /auth/social/register`. Fluxo de **ID Token**: o app faz o sign-in nativo e o backend so valida a assinatura contra o JWKS publico — sem `oauth2-client`, sem redirect, sem `client_secret`. Conta existente com o mesmo e-mail e vinculada automaticamente, **so** quando o provedor confirma `email_verified`. A verificacao de telefone continua obrigatoria: o Google substitui a senha, nunca a posse do numero. Desligado por default (`503`); ver `docs/login-social-google.md` |
 | Verificacao de telefone     | concluido     | `domain.verification` — cadastro exige posse do numero, provada por fluxo reverso na WhatsApp Cloud API (`/auth/phone/*` + `/webhooks/whatsapp`). Custo R$0 permanente: nunca enviamos mensagem, e o telefone da conta vem do `wa_id` que a Meta entrega, nao do formulario. **Validado ponta a ponta com WhatsApp real em 03/08/2026.** Para desenvolver nao e preciso configurar nada (`channel=LOG` e o default) — ver `docs/verificacao-telefone.md` |
 | `domain.maps`               | concluido     | `MapsService` + `OsrmMapsService` (cache-aside via `route_cache`, polyline pro mapa); `GeocodingService` + `PhotonGeocodingService` (busca de endereço/`reverse` via Photon, `geocode_cache`) |
 | `domain.payment`            | concluido     | `SimulatedPaymentService` — BR Code ficticio (sem PSP real) |
@@ -162,11 +172,13 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 
 ### Testes
 
-Cobertura atual (`mvn test`) — 15 classes, **133 testes**:
+Cobertura atual (`mvn test`) — 21 classes, **196 testes**:
 
-- `AuthControllerWebMvcTest` (MockMvc) — fluxos de register/login, `role: ADMIN` → 400 sem chegar ao service, role desconhecida → 400
+- `AuthControllerWebMvcTest` (MockMvc) — fluxos de register/login, `role: ADMIN` → 400 sem chegar ao service, role desconhecida → 400, `/auth/social` nos dois `status` + 401/503, `/auth/social/register` sem `verificationToken` → 400
 - `AuthServiceRegisterTest` (Mockito) — bloqueio de auto-cadastro como ADMIN antes de qualquer escrita, passageiro normalizado + token, motorista nasce `approved=false`, e-mail duplicado → 409
-- `AuthServiceLoginLockoutTest` — lockout após tentativas de login falhas
+- `AuthServiceLoginLockoutTest` — lockout após tentativas de login falhas; conta só-social recebe o mesmo 401 genérico (sem enumeração de usuário)
+- `GoogleIdTokenVerifierTest` — audiência de outro app Google → 401, `email_verified` como boolean e como string, token sem `sub`/`email`, falha do decoder → 401, ausência de client ID derruba o bean
+- `SocialAuthServiceTest` — identidade já vinculada, vinculação por e-mail verificado, `REGISTRATION_REQUIRED`, e-mail não verificado bloqueia antes de qualquer vínculo, usuário suspenso, cadastro social sem senha + motorista pendente, provedor não configurado → 503
 - `LoginAttemptServiceTest` — janela/contagem do lockout
 - `JwtServiceTest` — emissao e validacao de token
 - `CityNormalizerTest` — normalizacao de cidade
@@ -177,9 +189,9 @@ Cobertura atual (`mvn test`) — 15 classes, **133 testes**:
 - `SurgePolicyTest` — ladder por faixa, teto (`surge_cap`), oferta = 0 → teto, `surge_enabled = false` → 1.0x, cidade/categoria sem demanda → 1.0x
 - `RideExpirationSchedulerTest` — expiração de corridas paradas no mural (EXPIRED)
 - `DriverAutoOfflineSchedulerTest` — auto-offline de motorista por inatividade
-- `UserProfileServiceTest` — edição de perfil, troca de senha, re-emissão de JWT ao mudar cidade
+- `UserProfileServiceTest` — edição de perfil, troca de senha, re-emissão de JWT ao mudar cidade, conta só-social sem senha (409 explicativo) e reset pelo admin que a converte em dual
 - `AdminMetricsServiceTest` (Mockito) — painel admin: derivação de `active`/taxas/ticket médio, defaulting do período (últimos 30 dias), range invertido → 400, agregado nulo → zeros
 
-Total: **133 testes** passando em segundos (JUnit 5 + Mockito, sem Docker/Postgres).
+Total: **196 testes** passando em segundos (JUnit 5 + Mockito, sem Docker/Postgres).
 
 > **Lock otimista:** não é exercitado em unit test (depende do `@Version` do Hibernate em runtime). A garantia vem do schema (`rides.version`) + tradução de `ObjectOptimisticLockingFailureException` para HTTP 409 no `GlobalExceptionHandler`. Valide manualmente via `docs/smoke-test.md` seção 5 (aceite por dois motoristas).
