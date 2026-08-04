@@ -90,6 +90,7 @@ com.unimove
 - **Login social — guia do app:** [`docs/guia-app-login-google.md`](./docs/guia-app-login-google.md) — passo a passo para o dev mobile: OAuth clients de plataforma, `google_sign_in` e os dois fluxos de tela.
 - **Surge pricing:** [`docs/plano-surge-pricing.md`](./docs/plano-surge-pricing.md) — spec do preço dinâmico por demanda.
 - **Análise/roadmap:** [`docs/analise-mvp.md`](./docs/analise-mvp.md) — lacunas priorizadas para o piloto real.
+- **Deploy:** [`docs/deploy-vps.md`](./docs/deploy-vps.md) — provisionamento da VPS, secrets do GitHub, rollback e backup.
 
 ---
 
@@ -112,6 +113,8 @@ com.unimove
 | `GOOGLE_LOGIN_ENABLED` | `false`                           | nao — `true` liga `/auth/social` |
 | `GOOGLE_CLIENT_IDS`   | —                                  | so com `GOOGLE_LOGIN_ENABLED=true` |
 | `GOOGLE_JWK_SET_URI`  | JWKS do Google                     | nao         |
+| `DOMAIN`              | —                                  | **so em producao** — dominio publico que o Caddy usa para emitir o TLS |
+| `IMAGE_TAG`           | `latest`                           | nao — escrito pelo `scripts/deploy.sh`, nao editar na mao |
 
 Nenhuma das variaveis de WhatsApp e necessaria para desenvolver: o default `channel=LOG` roda o fluxo
 completo de verificacao localmente, sem conta na Meta e sem tunel (ver secao 0 de `docs/api.http`).
@@ -124,6 +127,33 @@ e uma **lista** separada por virgula porque o claim `aud` do `id_token` muda por
 `serverClientId` devolve o client ID web; iOS devolve o client ID iOS). Ver `docs/login-social-google.md`.
 
 Veja `.env.example` para o template completo.
+
+---
+
+## Deploy
+
+Push na `main` dispara o pipeline em [`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml):
+
+```
+[test]   mvn -B verify (196 testes, ~1min, sem Docker/Postgres)
+[build]  buildx --platform linux/arm64 -> ghcr.io/cristianneves/unimove:<sha> + :latest
+[deploy] scp da infra + ssh na VPS -> scripts/deploy.sh <sha>
+         pull, up -d, poll /actuator/health; se nao ficar UP, volta a tag anterior
+```
+
+Pull request na `main` roda **so** o job de testes — funciona como gate de merge.
+
+Alvo: VPS Oracle Cloud Always Free (Ampere A1, **ARM64**, Sao Paulo), com Postgres
+no proprio host e Caddy emitindo TLS. Passo a passo do provisionamento, secrets e
+rollback em [`docs/deploy-vps.md`](./docs/deploy-vps.md).
+
+> O `Dockerfile` e **so de runtime**: espera um `app.jar` pronto no contexto (o CI
+> compila antes). Para buildar a imagem na mao:
+> ```bash
+> ./mvnw package && cp target/unimove-backend-*.jar app.jar && docker build -t unimove .
+> ```
+> Ele nao tem nenhum `RUN` de proposito — e o que permite montar a imagem ARM64
+> num runner x86 sem emulacao QEMU.
 
 ---
 
