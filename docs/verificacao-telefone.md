@@ -165,9 +165,37 @@ Em **WhatsApp → Configuração → Webhook → Editar**:
 - **Token de verificação:** exatamente o valor de `WHATSAPP_WEBHOOK_VERIFY_TOKEN`
 - **Verificar e salvar** → a Meta dispara o `GET` de handshake; o backend responde sozinho.
 
-Depois, em **Gerenciar** os campos do webhook, **assine o campo `messages`**. Sem isso a URL fica configurada mas nenhuma mensagem chega — é o erro mais comum.
+Depois, em **Gerenciar** os campos do webhook, **assine o campo `messages`**.
 
 Deixe o app em **modo Live** (chave no topo do painel): em modo Dev parte dos webhooks não é entregue.
+
+### 5b. Inscrever a WABA no seu app ⚠️
+
+**São três assinaturas, não duas** — e esta terceira é a que trava todo mundo, porque o painel não a mostra:
+
+| # | Assinatura | Onde |
+|---|---|---|
+| 1 | URL de callback + verify token | painel |
+| 2 | App inscrito no campo `messages` | painel |
+| 3 | **WABA inscrita no seu app** | só via API |
+
+Sem a 3, a Meta entrega os eventos para o *"WA DevX Webhook Events 1P App"* — o app interno dela que alimenta a tela "Experimente" do onboarding. O sintoma é cruel: o payload aparece perfeito no navegador, com o número e o código certos, **e nada chega no backend**. Parece que o webhook está errado, mas o problema é que os eventos estão indo para outro destino.
+
+Conferir quem está inscrito:
+
+```bash
+curl "https://graph.facebook.com/v21.0/<WABA_ID>/subscribed_apps" \
+  -H "Authorization: Bearer <TOKEN>"
+```
+
+Se o seu app não estiver na lista, inscreva:
+
+```bash
+curl -X POST "https://graph.facebook.com/v21.0/<WABA_ID>/subscribed_apps" \
+  -H "Authorization: Bearer <TOKEN>"     # -> {"success":true}
+```
+
+O `WABA_ID` e um token temporário estão em **WhatsApp → Configuração da API**. O token precisa de `whatsapp_business_management`, e é o **único** momento em que a nossa integração toca a Graph API — a verificação em si nunca envia nada.
 
 ### 6. Testar
 
@@ -188,9 +216,12 @@ Deve vir `VERIFIED` com o `verificationToken` e o seu telefone mascarado.
 | Sintoma | Causa provável |
 |---|---|
 | Salvar o webhook falha | App fora do ar, túnel caído, ou verify token diferente |
+| **Payload aparece no painel mas nada chega no backend** | **WABA não inscrita no seu app — ver 5b** |
 | Webhook salvo mas status fica `PENDING` | Campo `messages` não assinado, ou app em modo Dev |
 | Backend loga "assinatura invalida" | `WHATSAPP_APP_SECRET` errado |
 | Status vira `REJECTED`/`PHONE_IN_USE` | Aquele número já tem conta — comportamento correto |
+
+Para diagnosticar, suba com `LOGGING_LEVEL_COM_UNIMOVE_DOMAIN_VERIFICATION=DEBUG`: em `INFO`, uma reentrega ou um código desconhecido passam silenciosos, e "não chegou" fica indistinguível de "chegou e foi ignorado".
 
 ---
 
