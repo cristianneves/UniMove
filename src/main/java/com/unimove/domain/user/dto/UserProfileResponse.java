@@ -19,6 +19,8 @@ public record UserProfileResponse(
         String name,
         String phone,
         boolean phoneVerified,
+        /** Falso em conta criada por login social: o app esconde "trocar senha". */
+        boolean hasPassword,
         Role role,
         String cidade,
         BigDecimal ratingAvg,
@@ -47,6 +49,7 @@ public record UserProfileResponse(
                 user.getName(),
                 user.getPhone(),
                 user.getPhoneVerifiedAt() != null,
+                user.getPasswordHash() != null,
                 user.getRole(),
                 user.getCidade(),
                 user.getRatingAvg(),

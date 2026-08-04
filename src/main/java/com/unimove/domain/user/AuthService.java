@@ -96,7 +96,11 @@ public class AuthService {
         String email = req.email().trim().toLowerCase();
         loginAttemptService.assertNotLocked(email);
         User user = userRepository.findByEmail(email).orElse(null);
-        if (user == null || !passwordEncoder.matches(req.password(), user.getPasswordHash())) {
+        // Conta criada por login social nao tem senha. O erro e o mesmo de
+        // credencial errada de proposito: dizer "esta conta usa Google" seria
+        // enumeracao de usuario.
+        boolean hasPassword = user != null && user.getPasswordHash() != null;
+        if (!hasPassword || !passwordEncoder.matches(req.password(), user.getPasswordHash())) {
             loginAttemptService.recordFailure(email);
             throw new BadCredentialsException("Credenciais inválidas");
         }
@@ -108,13 +112,6 @@ public class AuthService {
     }
 
     private AuthResponse issueToken(User user) {
-        JwtService.IssuedToken issued = jwtService.generate(user);
-        return new AuthResponse(
-                issued.token(),
-                user.getId(),
-                user.getRole(),
-                user.getCidade(),
-                issued.expiresAt()
-        );
+        return AuthResponse.of(user, jwtService.generate(user));
     }
 }
