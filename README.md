@@ -87,6 +87,7 @@ com.unimove
 - **Visão geral e fluxo no Swagger:** [`docs/visao-geral-e-fluxo-swagger.md`](./docs/visao-geral-e-fluxo-swagger.md) — porquê de cada decisão de MVP + roteiro completo.
 - **Painel de métricas (admin):** [`docs/admin-metrics.md`](./docs/admin-metrics.md) — contrato do `GET /admin/metrics`.
 - **Login social:** [`docs/login-social-google.md`](./docs/login-social-google.md) — fluxo de ID Token, vinculação de contas e configuração no Google Cloud.
+- **Login social — guia do app:** [`docs/guia-app-login-google.md`](./docs/guia-app-login-google.md) — passo a passo para o dev mobile: OAuth clients de plataforma, `google_sign_in` e os dois fluxos de tela.
 - **Surge pricing:** [`docs/plano-surge-pricing.md`](./docs/plano-surge-pricing.md) — spec do preço dinâmico por demanda.
 - **Análise/roadmap:** [`docs/analise-mvp.md`](./docs/analise-mvp.md) — lacunas priorizadas para o piloto real.
 
