@@ -12,6 +12,7 @@ import java.util.UUID;
 public interface UserRepository extends JpaRepository<User, UUID> {
     Optional<User> findByEmail(String email);
     boolean existsByEmail(String email);
+    boolean existsByPhone(String phone);
 
     @Query("select u.status from User u where u.id = :id")
     Optional<UserStatus> findStatusById(@Param("id") UUID id);

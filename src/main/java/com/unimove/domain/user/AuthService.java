@@ -3,6 +3,7 @@ package com.unimove.domain.user;
 import com.unimove.domain.user.dto.AuthResponse;
 import com.unimove.domain.user.dto.LoginRequest;
 import com.unimove.domain.user.dto.RegisterRequest;
+import com.unimove.domain.verification.PhoneVerificationService;
 import com.unimove.shared.security.JwtService;
 import com.unimove.shared.util.CityNormalizer;
 import org.slf4j.Logger;
@@ -11,6 +12,8 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Clock;
 
 @Service
 public class AuthService {
@@ -22,17 +25,23 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final LoginAttemptService loginAttemptService;
+    private final PhoneVerificationService phoneVerificationService;
+    private final Clock clock;
 
     public AuthService(UserRepository userRepository,
                        DriverRepository driverRepository,
                        PasswordEncoder passwordEncoder,
                        JwtService jwtService,
-                       LoginAttemptService loginAttemptService) {
+                       LoginAttemptService loginAttemptService,
+                       PhoneVerificationService phoneVerificationService,
+                       Clock clock) {
         this.userRepository = userRepository;
         this.driverRepository = driverRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.loginAttemptService = loginAttemptService;
+        this.phoneVerificationService = phoneVerificationService;
+        this.clock = clock;
     }
 
     @Transactional
@@ -52,11 +61,18 @@ public class AuthService {
             throw new InvalidCityException();
         }
 
+        // O telefone vem do desafio verificado (wa_id entregue pela Meta), nunca
+        // do formulario. Roda dentro desta transacao de proposito: se o cadastro
+        // falhar adiante, o rollback devolve o token e o usuario corrige o
+        // formulario sem precisar verificar de novo.
+        String verifiedPhone = phoneVerificationService.consumeVerifiedPhone(req.verificationToken());
+
         User user = new User();
         user.setEmail(email);
         user.setPasswordHash(passwordEncoder.encode(req.password()));
         user.setName(req.name().trim());
-        user.setPhone(req.phone());
+        user.setPhone(verifiedPhone);
+        user.setPhoneVerifiedAt(clock.instant());
         user.setRole(req.role());
         user.setCidade(cidade);
         userRepository.save(user);

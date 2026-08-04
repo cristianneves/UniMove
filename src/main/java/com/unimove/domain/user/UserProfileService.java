@@ -53,7 +53,9 @@ public class UserProfileService {
     }
 
     /**
-     * Atualiza nome, telefone e cidade. E-mail (login) e role são imutáveis.
+     * Atualiza nome e cidade. E-mail (login), role e telefone são imutáveis —
+     * o telefone foi verificado no WhatsApp durante o cadastro e deixá-lo
+     * editável aqui anularia aquela verificação.
      * Como o JWT carrega a claim {@code cidade}, mudança de cidade reemite o
      * token — sem isso, mural e criação de corrida continuariam usando a
      * cidade antiga até o re-login.
@@ -70,7 +72,6 @@ public class UserProfileService {
         boolean cidadeChanged = !cidade.equals(user.getCidade());
 
         user.setName(req.name().trim());
-        user.setPhone(trimToNull(req.phone()));
         user.setCidade(cidade);
 
         String token = null;
@@ -117,14 +118,6 @@ public class UserProfileService {
         user.setPasswordHash(passwordEncoder.encode(temporaryPassword));
         log.warn("Senha do usuário {} resetada pelo admin {}", targetUserId, adminId);
         return new AdminResetPasswordResponse(user.getId(), user.getEmail(), temporaryPassword);
-    }
-
-    private static String trimToNull(String s) {
-        if (s == null) {
-            return null;
-        }
-        String trimmed = s.trim();
-        return trimmed.isEmpty() ? null : trimmed;
     }
 
     private String generateTemporaryPassword() {

@@ -43,7 +43,7 @@ class AuthControllerWebMvcTest {
     @Test
     void registerReturns201WithBody() throws Exception {
         RegisterRequest req = new RegisterRequest(
-                "p@example.com", "senha12345", "Maria", null,
+                "p@example.com", "senha12345", "Maria", "token-verificado",
                 Role.PASSAGEIRO, "Campinas", null, null
         );
         AuthResponse resp = new AuthResponse("jwt-token", UUID.randomUUID(),
@@ -75,7 +75,8 @@ class AuthControllerWebMvcTest {
     @Test
     void registerMotoristaWithoutVehicleReturns400() throws Exception {
         RegisterRequest req = new RegisterRequest(
-                "m@example.com", "senha12345", "João", null,
+                // Token válido de propósito: o 400 aqui tem de vir da falta de veículo.
+                "m@example.com", "senha12345", "João", "token-verificado",
                 Role.MOTORISTA, "Campinas", null, null
         );
 
@@ -89,7 +90,8 @@ class AuthControllerWebMvcTest {
     @Test
     void registerAsAdminReturns400AndNeverReachesService() throws Exception {
         RegisterRequest req = new RegisterRequest(
-                "hacker@example.com", "senha12345", "Invasor", null,
+                // Token válido de propósito: o 400 aqui tem de vir da role ADMIN.
+                "hacker@example.com", "senha12345", "Invasor", "token-verificado",
                 Role.ADMIN, "Campinas", null, null
         );
 
