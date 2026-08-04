@@ -19,6 +19,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
@@ -114,6 +115,21 @@ class AuthServiceLoginLockoutTest {
                 .isInstanceOf(BadCredentialsException.class);
 
         verify(loginAttemptService).assertNotLocked("p@example.com");
+        verify(loginAttemptService).recordFailure("p@example.com");
+    }
+
+    @Test
+    @DisplayName("conta criada por login social recebe o mesmo 401 genérico")
+    void socialOnlyAccountCannotLoginWithPassword() {
+        user.setPasswordHash(null);
+        when(userRepository.findByEmail("p@example.com")).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> service.login(new LoginRequest("p@example.com", "qualquer")))
+                .isInstanceOf(BadCredentialsException.class);
+
+        // Nem tenta comparar hash nulo, e não revela que a conta existe e usa
+        // provedor social — isso seria enumeração de usuário.
+        verify(passwordEncoder, never()).matches(anyString(), any());
         verify(loginAttemptService).recordFailure("p@example.com");
     }
 
