@@ -1,0 +1,118 @@
+name: CI/CD
+
+# PR na main  -> so roda os testes (gate de merge).
+# Push na main -> testes, publica a imagem no GHCR e faz o deploy na VPS.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Dois deploys simultaneos brigariam pelo mesmo .env da VPS. Enfileira em vez
+# de cancelar: cancelar no meio deixaria a stack num estado indefinido.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/cristianneves/unimove
+
+jobs:
+  test:
+    name: Testes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      # A suite e toda unitaria / @WebMvcTest: nao precisa de Postgres nem
+      # de Docker. Roda em ~1min.
+      - name: mvn verify
+        run: mvn -B verify
+
+      # Reaproveitado pelo job de build: evita recompilar.
+      - name: Preparar app.jar
+        if: github.event_name != 'pull_request'
+        run: cp target/unimove-backend-*.jar app.jar
+
+      - name: Publicar artefato
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-jar
+          path: app.jar
+          retention-days: 1
+
+  build:
+    name: Imagem ARM64 -> GHCR
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      # So o .dockerignore e o Dockerfile — o contexto de build e so o app.jar.
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-jar
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # A VPS e ARM (Oracle Ampere A1). Como o Dockerfile nao tem nenhum RUN,
+      # buildar arm64 num runner x86 nao executa codigo ARM — nada de QEMU.
+      - name: Build e push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+
+  deploy:
+    name: Deploy na VPS
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # Host key fixado num secret: sem isso o known_hosts seria aceito as
+          # cegas a cada run e um MITM passaria despercebido.
+          printf '%s\n' "${{ secrets.VPS_SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+
+      # Compose, Caddyfile e deploy.sh vivem no repositorio e sao reenviados a
+      # cada deploy: a VPS nunca fica com uma versao defasada da infra.
+      - name: Enviar arquivos de infra
+        run: |
+          scp -i ~/.ssh/id_ed25519 \
+            docker-compose.prod.yml Caddyfile scripts/deploy.sh \
+            "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/opt/unimove/"
+
+      - name: Executar deploy
+        run: |
+          ssh -i ~/.ssh/id_ed25519 \
+            "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+            "chmod +x /opt/unimove/deploy.sh && /opt/unimove/deploy.sh ${{ github.sha }}"
