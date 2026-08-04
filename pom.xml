@@ -90,6 +90,14 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- JOSE/JWT do Spring Security: valida o id_token do Google contra o JWKS
+             publico (cache e rotacao de chave inclusos). Nao e o oauth2-client:
+             o fluxo e de ID Token vindo do app, sem redirect nem client_secret. -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-oauth2-jose</artifactId>
+        </dependency>
+
         <!-- Lombok (reduz boilerplate em entidades) -->
         <dependency>
             <groupId>org.projectlombok</groupId>

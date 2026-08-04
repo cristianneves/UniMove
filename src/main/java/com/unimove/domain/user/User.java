@@ -29,7 +29,8 @@ public class User {
     @Column(name = "email", nullable = false, unique = true, length = 255)
     private String email;
 
-    @Column(name = "password_hash", nullable = false, length = 255)
+    /** Nulo em conta criada por login social — o Google substitui a senha (V20). */
+    @Column(name = "password_hash", length = 255)
     private String passwordHash;
 
     @Column(name = "name", nullable = false, length = 120)

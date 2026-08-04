@@ -161,6 +161,58 @@ Content-Type: application/json
   "password": "senha12345"
 }
 
+### 1.5 Login social — entrar com Google
+# O app faz o sign-in nativo e manda o id_token (NAO o access token).
+# Sem GOOGLE_LOGIN_ENABLED=true isto responde 503 — e o esperado em dev.
+# Resposta 200 discriminada:
+#   status=AUTHENTICATED        -> JWT em .auth
+#   status=REGISTRATION_REQUIRED -> primeiro acesso; siga para 0.1/0.2/0.3 e depois 1.6
+# @name socialLogin
+POST {{host}}/auth/social
+Content-Type: application/json
+
+{
+  "provider": "GOOGLE",
+  "idToken": "COLE_O_ID_TOKEN_DO_APP_AQUI"
+}
+
+> {% if (response.body.auth) { client.global.set("passageiroToken", response.body.auth.token); } %}
+
+### 1.6 Login social — completar o primeiro acesso
+# Reenvia o MESMO idToken (revalidado aqui) + o verificationToken do passo 0.3.
+# O Google substitui a senha, nunca a verificacao do telefone: sem
+# verificationToken isto e 400. A conta nasce sem senha (hasPassword=false).
+POST {{host}}/auth/social/register
+Content-Type: application/json
+
+{
+  "provider": "GOOGLE",
+  "idToken": "COLE_O_ID_TOKEN_DO_APP_AQUI",
+  "verificationToken": "{{verificationToken}}",
+  "role": "PASSAGEIRO",
+  "cidade": "Remanso"
+}
+
+### 1.6b Login social sem verificacao de telefone (esperado: 400)
+POST {{host}}/auth/social/register
+Content-Type: application/json
+
+{
+  "provider": "GOOGLE",
+  "idToken": "COLE_O_ID_TOKEN_DO_APP_AQUI",
+  "role": "PASSAGEIRO",
+  "cidade": "Remanso"
+}
+
+### 1.6c Token adulterado/expirado/de outro app (esperado: 401)
+POST {{host}}/auth/social
+Content-Type: application/json
+
+{
+  "provider": "GOOGLE",
+  "idToken": "eyJhbGciOiJSUzI1NiJ9.payload-invalido.assinatura-invalida"
+}
+
 
 ###############################################################
 # 2. ADMIN — aprovacao de motorista

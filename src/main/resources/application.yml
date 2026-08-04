@@ -44,6 +44,14 @@ app:
     token-ttl-minutes: ${PHONE_TOKEN_TTL_MINUTES:15}
     max-challenges-per-ip-hour: ${PHONE_MAX_CHALLENGES_PER_IP_HOUR:20}
     purge-interval-ms: ${PHONE_VERIFICATION_PURGE_INTERVAL_MS:600000}
+  social:
+    google:
+      # Desligado por padrao: dev e testes rodam sem credencial e /auth/social responde 503.
+      enabled: ${GOOGLE_LOGIN_ENABLED:false}
+      # Lista separada por virgula. O 'aud' do id_token muda por plataforma:
+      # Android com serverClientId devolve o client ID WEB, iOS devolve o client ID iOS.
+      client-ids: ${GOOGLE_CLIENT_IDS:}
+      jwk-set-uri: ${GOOGLE_JWK_SET_URI:https://www.googleapis.com/oauth2/v3/certs}
   whatsapp:
     # Numero da UniMove em E.164 sem '+'. So usado com channel=WHATSAPP.
     business-number: ${WHATSAPP_BUSINESS_NUMBER:}

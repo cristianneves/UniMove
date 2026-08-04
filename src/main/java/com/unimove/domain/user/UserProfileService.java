@@ -95,6 +95,13 @@ public class UserProfileService {
     public void changePassword(AuthenticatedUser auth, String currentPassword, String newPassword) {
         User user = userRepository.findById(auth.userId())
                 .orElseThrow(UserNotFoundException::new);
+        // Conta criada por login social nao tem senha atual para conferir.
+        // Aqui o usuario ja esta autenticado, entao a mensagem especifica nao
+        // vaza nada — e sem ela o erro seria "senha atual incorreta", que
+        // manda o usuario procurar uma senha que nunca existiu.
+        if (user.getPasswordHash() == null) {
+            throw new PasswordNotSetException();
+        }
         if (!passwordEncoder.matches(currentPassword, user.getPasswordHash())) {
             throw new InvalidCurrentPasswordException();
         }

@@ -89,6 +89,30 @@ class UserProfileServiceTest {
     }
 
     @Test
+    @DisplayName("changePassword em conta social diz que não há senha, em vez de 'senha atual incorreta'")
+    void changePasswordOnSocialOnlyAccount() {
+        user.setPasswordHash(null);
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> service.changePassword(auth, "qualquer", "senhaNova123"))
+                .isInstanceOf(PasswordNotSetException.class);
+
+        verify(passwordEncoder, never()).encode(anyString());
+    }
+
+    @Test
+    @DisplayName("resetPassword dá senha a uma conta social, que passa a aceitar os dois métodos")
+    void resetPasswordOnSocialOnlyAccount() {
+        user.setPasswordHash(null);
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+        when(passwordEncoder.encode(anyString())).thenReturn("hash-temporario");
+
+        service.resetPassword(USER_ID, ADMIN_ID);
+
+        assertThat(user.getPasswordHash()).isEqualTo("hash-temporario");
+    }
+
+    @Test
     @DisplayName("changePassword falha se o usuário do token não existe mais")
     void changePasswordUserNotFound() {
         when(userRepository.findById(USER_ID)).thenReturn(Optional.empty());
