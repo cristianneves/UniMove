@@ -1,10 +1,13 @@
-# Stack de producao — roda na VPS em /opt/unimove.
+# Stack self-hosted completa (API + Postgres + TLS), para rodar numa VPS.
 #
-# A imagem NAO e compilada aqui: vem pronta do GHCR, publicada pelo
-# .github/workflows/deploy.yml. Quem orquestra o deploy e o scripts/deploy.sh.
+# NAO e o alvo de producao atual: hoje o deploy vai para o Render + Supabase
+# (ver docs/deploy.md). Este arquivo continua util para
+#   a) subir a imagem de producao localmente e testar de ponta a ponta, e
+#   b) migrar para uma VPS propria sem reescrever nada.
 #
-# Segredos vivem em /opt/unimove/.env (chmod 600), nunca no GitHub.
-# Ver docs/deploy-vps.md.
+# A imagem nao e compilada aqui: vem pronta do GHCR.
+# Uso: crie um .env ao lado (DOMAIN, DATABASE_PASSWORD, JWT_SECRET) e
+#   docker compose -f docker-compose.prod.yml up -d
 
 # Sem limite, o json-file cresce sem parar e enche o disco de uma VPS que
 # ninguem visita. 30 MB por servico ja da historico de sobra pra depurar.

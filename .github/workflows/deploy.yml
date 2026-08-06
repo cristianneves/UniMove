@@ -1,7 +1,7 @@
 name: CI/CD
 
 # PR na main  -> so roda os testes (gate de merge).
-# Push na main -> testes, publica a imagem no GHCR e faz o deploy na VPS.
+# Push na main -> testes, publica a imagem no GHCR e dispara o deploy no Render.
 on:
   push:
     branches: [main]
@@ -9,8 +9,8 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Dois deploys simultaneos brigariam pelo mesmo .env da VPS. Enfileira em vez
-# de cancelar: cancelar no meio deixaria a stack num estado indefinido.
+# Dois deploys simultaneos disputariam o mesmo servico. Enfileira em vez de
+# cancelar: cancelar no meio deixaria o Render num estado indefinido.
 concurrency:
   group: deploy-production
   cancel-in-progress: false
@@ -50,7 +50,7 @@ jobs:
           retention-days: 1
 
   build:
-    name: Imagem ARM64 -> GHCR
+    name: Imagem -> GHCR
     needs: test
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
@@ -73,46 +73,45 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # A VPS e ARM (Oracle Ampere A1). Como o Dockerfile nao tem nenhum RUN,
-      # buildar arm64 num runner x86 nao executa codigo ARM — nada de QEMU.
       - name: Build e push
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/arm64
+          platforms: linux/amd64
           push: true
           tags: |
             ${{ env.IMAGE }}:${{ github.sha }}
             ${{ env.IMAGE }}:latest
 
   deploy:
-    name: Deploy na VPS
+    name: Deploy no Render
     needs: build
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Configurar SSH
+      # Servicos que rodam imagem de registry nao redeployam sozinhos quando a
+      # tag e reescrita — o deploy so acontece com este hook. O imgURL fixa o
+      # SHA exato: o deploy fica versionado, e reenviar o hook com um SHA antigo
+      # e o rollback.
+      - name: Disparar deploy
         run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          # Host key fixado num secret: sem isso o known_hosts seria aceito as
-          # cegas a cada run e um MITM passaria despercebido.
-          printf '%s\n' "${{ secrets.VPS_SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          curl -fsS -G "${{ secrets.RENDER_DEPLOY_HOOK }}" \
+            --data-urlencode "imgURL=${{ env.IMAGE }}:${{ github.sha }}"
 
-      # Compose, Caddyfile e deploy.sh vivem no repositorio e sao reenviados a
-      # cada deploy: a VPS nunca fica com uma versao defasada da infra.
-      - name: Enviar arquivos de infra
+      # O hook responde na hora, sem esperar o deploy. Confirmamos pelo endpoint
+      # publico. O sleep inicial evita ler o health da versao ANTIGA, que ainda
+      # responde nos primeiros segundos.
+      - name: Aguardar o servico voltar
         run: |
-          scp -i ~/.ssh/id_ed25519 \
-            docker-compose.prod.yml Caddyfile scripts/deploy.sh \
-            "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/opt/unimove/"
-
-      - name: Executar deploy
-        run: |
-          ssh -i ~/.ssh/id_ed25519 \
-            "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
-            "chmod +x /opt/unimove/deploy.sh && /opt/unimove/deploy.sh ${{ github.sha }}"
+          sleep 45
+          for i in $(seq 1 40); do
+            if curl -fsS --max-time 10 "${{ secrets.RENDER_SERVICE_URL }}/actuator/health" \
+                 | grep -q '"status":"UP"'; then
+              echo "servico UP apos $((45 + i * 15))s"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::O servico nao respondeu UP. Veja os logs em https://dashboard.render.com"
+          exit 1

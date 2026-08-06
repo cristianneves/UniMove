@@ -1,25 +1,29 @@
 # Perfil de producao (SPRING_PROFILES_ACTIVE=prod).
 #
-# Existe sobretudo para impedir que producao suba com os defaults de
-# desenvolvimento do application.yml:
+# Alvo atual: Render (web service free, 512 MB / 0.1 vCPU) + Postgres no
+# Supabase, acessado pelo pooler em session mode. Ver docs/deploy.md.
+#
+# --- Por que redeclarar JWT_SECRET e DATABASE_PASSWORD ---
+# O application.yml define defaults de desenvolvimento para os dois:
 #
 #   JWT_SECRET        -> "dev-secret-NAO-USE-EM-PRODUCAO-..."  (48 chars: chave HMAC VALIDA!)
 #   DATABASE_PASSWORD -> "changeme"
 #
 # Sem as redeclaracoes abaixo, esquecer a env var nao quebraria nada: a API
 # subiria feliz assinando JWT com um segredo que esta neste repositorio.
-#
-# A guarda PRINCIPAL e o `${VAR:?mensagem}` do docker-compose.prod.yml, que
-# recusa subir a stack com mensagem clara antes de criar qualquer container.
-# As linhas aqui sao a segunda camada, para quem rodar o jar fora do compose:
-# o Binder do Spring Boot nao explode em placeholder nao resolvido — ele passa
-# o texto literal "${JWT_SECRET}" adiante. O startup aborta mesmo assim
-# (o JJWT rejeita os 13 bytes como chave HMAC fraca; o Postgres recusa a senha
-# literal), so que com erro menos obvio. O que importa e que aborta em vez de
-# usar o segredo de desenvolvimento.
+# O Binder do Spring Boot nao explode em placeholder nao resolvido — ele passa
+# o texto literal "${JWT_SECRET}" adiante. O startup aborta mesmo assim (o JJWT
+# rejeita os 13 bytes como chave HMAC fraca; o Postgres recusa a senha literal),
+# so que com erro menos obvio. O que importa e que aborta em vez de usar o
+# segredo de desenvolvimento.
 spring:
   datasource:
     password: ${DATABASE_PASSWORD}
+    hikari:
+      # O pooler do Supabase e compartilhado e o plano free tem poucas conexoes.
+      # Cada conexao tambem custa memoria num container de 512 MB.
+      maximum-pool-size: 5
+      minimum-idle: 1
   # SSE (mural, chat, status da corrida) segura conexoes abertas por minutos.
   # O shutdown gracioso deixa as requisicoes em voo terminarem e corta os
   # streams no timeout, em vez de derrubar tudo no SIGTERM do deploy.
@@ -28,6 +32,12 @@ spring:
 
 server:
   shutdown: graceful
+  tomcat:
+    threads:
+      # O default de 200 threads nao faz sentido com 0.1 vCPU e custa memoria.
+      # Os endpoints SSE usam processamento assincrono e devolvem a thread do
+      # container, entao nao ocupam uma vaga enquanto o stream fica aberto.
+      max: 50
 
 app:
   jwt:
