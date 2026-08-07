@@ -16,9 +16,12 @@ services:
     region: virginia
     image:
       url: ghcr.io/cristianneves/unimove:latest
-      # Nome da credencial cadastrada em Workspace Settings -> Registry Credentials
-      # (PAT do GitHub com escopo read:packages). O pacote e privado.
-      creds: ghcr-unimove
+      # Referencia a credencial cadastrada em Workspace Settings -> Registry
+      # Credentials (PAT do GitHub com escopo read:packages). O pacote e privado.
+      # Aqui vai so o NOME: o segredo nunca entra neste arquivo.
+      creds:
+        fromRegistryCreds:
+          name: ghcr-unimove
     healthCheckPath: /actuator/health
     envVars:
       - key: SPRING_PROFILES_ACTIVE
@@ -34,9 +37,13 @@ services:
       - key: DATABASE_PASSWORD
         sync: false
 
-      # openssl rand -base64 48
+      # O Render gera um valor base64 de 256 bits na criacao — exatamente o
+      # minimo que o JJWT exige (ele rejeita chave HMAC menor que isso).
+      # Assim a chave de assinatura nasce dentro do Render e nunca passa por
+      # terminal, clipboard ou log. So e gerada se ainda nao existir, entao um
+      # sync do Blueprint nao rotaciona o segredo nem invalida os tokens em uso.
       - key: JWT_SECRET
-        sync: false
+        generateValue: true
 
       # --- Verificacao de telefone ---
       # Comece em LOG. Trocar para WHATSAPP com as tres credenciais vazias
