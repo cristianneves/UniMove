@@ -1,5 +1,6 @@
 package com.unimove.domain.user;
 
+import com.unimove.domain.city.CityCatalog;
 import com.unimove.domain.user.dto.AuthResponse;
 import com.unimove.domain.user.dto.LoginRequest;
 import com.unimove.domain.user.dto.RegisterRequest;
@@ -26,6 +27,7 @@ public class AuthService {
     private final JwtService jwtService;
     private final LoginAttemptService loginAttemptService;
     private final PhoneVerificationService phoneVerificationService;
+    private final CityCatalog cityCatalog;
     private final Clock clock;
 
     public AuthService(UserRepository userRepository,
@@ -34,6 +36,7 @@ public class AuthService {
                        JwtService jwtService,
                        LoginAttemptService loginAttemptService,
                        PhoneVerificationService phoneVerificationService,
+                       CityCatalog cityCatalog,
                        Clock clock) {
         this.userRepository = userRepository;
         this.driverRepository = driverRepository;
@@ -41,6 +44,7 @@ public class AuthService {
         this.jwtService = jwtService;
         this.loginAttemptService = loginAttemptService;
         this.phoneVerificationService = phoneVerificationService;
+        this.cityCatalog = cityCatalog;
         this.clock = clock;
     }
 
@@ -60,6 +64,10 @@ public class AuthService {
         if (cidade.isEmpty()) {
             throw new InvalidCityException();
         }
+        // Antes de consumir o token do WhatsApp: falhar aqui devolve o desafio
+        // no rollback, mas nao ha razao para gastar o token com um cadastro que
+        // ja sabemos invalido.
+        cityCatalog.assertServed(cidade);
 
         // O telefone vem do desafio verificado (wa_id entregue pela Meta), nunca
         // do formulario. Roda dentro desta transacao de proposito: se o cadastro

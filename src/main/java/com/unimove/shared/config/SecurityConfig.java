@@ -43,6 +43,10 @@ public class SecurityConfig {
                                 // e a assinatura HMAC do payload, conferida no proprio controller.
                                 "/webhooks/whatsapp",
                                 "/share/**",
+                                // Lista de cidades atendidas: o app precisa dela
+                                // para montar o seletor da tela de cadastro,
+                                // antes de existir qualquer token.
+                                "/cities",
                                 "/actuator/health",
                                 "/v3/api-docs/**",
                                 "/swagger-ui/**",

@@ -22,4 +22,6 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     long countByRole(Role role);
 
     long countByStatus(UserStatus status);
+
+    long countByCidade(String cidade);
 }

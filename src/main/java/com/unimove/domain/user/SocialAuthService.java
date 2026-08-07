@@ -1,5 +1,6 @@
 package com.unimove.domain.user;
 
+import com.unimove.domain.city.CityCatalog;
 import com.unimove.domain.user.dto.AuthResponse;
 import com.unimove.domain.user.dto.SocialAuthResponse;
 import com.unimove.domain.user.dto.SocialLoginRequest;
@@ -44,6 +45,7 @@ public class SocialAuthService {
     private final SocialIdentityRepository socialIdentityRepository;
     private final PhoneVerificationService phoneVerificationService;
     private final JwtService jwtService;
+    private final CityCatalog cityCatalog;
     private final Clock clock;
 
     public SocialAuthService(List<SocialIdentityVerifier> verifiers,
@@ -52,6 +54,7 @@ public class SocialAuthService {
                              SocialIdentityRepository socialIdentityRepository,
                              PhoneVerificationService phoneVerificationService,
                              JwtService jwtService,
+                             CityCatalog cityCatalog,
                              Clock clock) {
         verifiers.forEach(v -> this.verifiers.put(v.provider(), v));
         this.userRepository = userRepository;
@@ -59,6 +62,7 @@ public class SocialAuthService {
         this.socialIdentityRepository = socialIdentityRepository;
         this.phoneVerificationService = phoneVerificationService;
         this.jwtService = jwtService;
+        this.cityCatalog = cityCatalog;
         this.clock = clock;
     }
 
@@ -112,6 +116,7 @@ public class SocialAuthService {
         if (cidade.isEmpty()) {
             throw new InvalidCityException();
         }
+        cityCatalog.assertServed(cidade);
 
         // Mesma transacao do cadastro: se algo falhar adiante, o rollback
         // devolve o token de verificacao e o usuario nao refaz o WhatsApp.

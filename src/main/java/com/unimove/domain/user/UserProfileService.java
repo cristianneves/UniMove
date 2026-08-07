@@ -1,5 +1,6 @@
 package com.unimove.domain.user;
 
+import com.unimove.domain.city.CityCatalog;
 import com.unimove.domain.user.dto.AdminResetPasswordResponse;
 import com.unimove.domain.user.dto.UpdateProfileRequest;
 import com.unimove.domain.user.dto.UpdateProfileResponse;
@@ -30,16 +31,19 @@ public class UserProfileService {
     private final DriverRepository driverRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final CityCatalog cityCatalog;
     private final SecureRandom random = new SecureRandom();
 
     public UserProfileService(UserRepository userRepository,
                               DriverRepository driverRepository,
                               PasswordEncoder passwordEncoder,
-                              JwtService jwtService) {
+                              JwtService jwtService,
+                              CityCatalog cityCatalog) {
         this.userRepository = userRepository;
         this.driverRepository = driverRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
+        this.cityCatalog = cityCatalog;
     }
 
     @Transactional(readOnly = true)
@@ -59,6 +63,11 @@ public class UserProfileService {
      * Como o JWT carrega a claim {@code cidade}, mudança de cidade reemite o
      * token — sem isso, mural e criação de corrida continuariam usando a
      * cidade antiga até o re-login.
+     *
+     * <p>Motorista que muda de cidade é derrubado para offline: continuar
+     * "online" num mural que ele não vê mais o manteria no denominador do surge
+     * da cidade que abandonou. Ele reentra pelo {@code POST /drivers/me/online}
+     * quando estiver de fato disponível na cidade nova.
      */
     @Transactional
     public UpdateProfileResponse updateProfile(AuthenticatedUser auth, UpdateProfileRequest req) {
@@ -69,6 +78,7 @@ public class UserProfileService {
         if (cidade == null || cidade.isEmpty()) {
             throw new InvalidCityException();
         }
+        cityCatalog.assertServed(cidade);
         boolean cidadeChanged = !cidade.equals(user.getCidade());
 
         user.setName(req.name().trim());
@@ -82,12 +92,21 @@ public class UserProfileService {
             tokenExpiresAt = issued.expiresAt();
         }
 
-        log.info("Perfil do usuário {} atualizado (cidade {} -> {})",
-                user.getId(), auth.cidade(), cidade);
-
         Driver driver = user.getRole() == Role.MOTORISTA
                 ? driverRepository.findById(user.getId()).orElse(null)
                 : null;
+
+        // Entidade gerenciada: o flush da transação persiste, sem query extra.
+        if (cidadeChanged && driver != null && driver.isOnline()) {
+            driver.setOnline(false);
+            driver.setLastSeenAt(Instant.now());
+            log.info("Driver {} → offline (trocou de cidade {} -> {})",
+                    user.getId(), auth.cidade(), cidade);
+        }
+
+        log.info("Perfil do usuário {} atualizado (cidade {} -> {})",
+                user.getId(), auth.cidade(), cidade);
+
         return new UpdateProfileResponse(UserProfileResponse.from(user, driver), token, tokenExpiresAt);
     }
 

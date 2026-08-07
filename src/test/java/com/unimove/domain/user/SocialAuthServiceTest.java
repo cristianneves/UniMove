@@ -1,5 +1,7 @@
 package com.unimove.domain.user;
 
+import com.unimove.domain.city.CityCatalog;
+import com.unimove.domain.city.CityNotServedException;
 import com.unimove.domain.user.dto.AuthResponse;
 import com.unimove.domain.user.dto.SocialAuthResponse;
 import com.unimove.domain.user.dto.SocialLoginRequest;
@@ -33,6 +35,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -54,6 +57,7 @@ class SocialAuthServiceTest {
     @Mock SocialIdentityRepository socialIdentityRepository;
     @Mock PhoneVerificationService phoneVerificationService;
     @Mock JwtService jwtService;
+    @Mock CityCatalog cityCatalog;
 
     private SocialAuthService service;
 
@@ -66,7 +70,7 @@ class SocialAuthServiceTest {
 
     private SocialAuthService newService(List<SocialIdentityVerifier> verifiers) {
         return new SocialAuthService(verifiers, userRepository, driverRepository, socialIdentityRepository,
-                phoneVerificationService, jwtService, Clock.fixed(NOW, ZoneOffset.UTC));
+                phoneVerificationService, jwtService, cityCatalog, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     /** Encurta o arranjo: o provedor devolve a identidade pedida. */
@@ -231,7 +235,25 @@ class SocialAuthServiceTest {
 
         verify(socialIdentityRepository).save(any());
         verify(driverRepository, never()).save(any());
+        verify(cityCatalog).assertServed("remanso");
         assertThat(resp.token()).isEqualTo("jwt");
+    }
+
+    @Test
+    @DisplayName("cadastro social em cidade não atendida é barrado sem gastar a verificação")
+    void registerInCityNotServedIsRejected() {
+        givenVerifiedIdentity(true);
+        when(socialIdentityRepository.findByProviderAndSubject(SocialProvider.GOOGLE, SUBJECT))
+                .thenReturn(Optional.empty());
+        when(userRepository.existsByEmail(EMAIL)).thenReturn(false);
+        doThrow(new CityNotServedException()).when(cityCatalog).assertServed("remanso");
+
+        assertThatThrownBy(() -> service.register(registerRequest(Role.PASSAGEIRO, null, null)))
+                .isInstanceOf(CityNotServedException.class);
+
+        verify(phoneVerificationService, never()).consumeVerifiedPhone(anyString());
+        verify(userRepository, never()).save(any());
+        verify(socialIdentityRepository, never()).save(any());
     }
 
     @Test

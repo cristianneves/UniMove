@@ -1,5 +1,7 @@
 package com.unimove.domain.user;
 
+import com.unimove.domain.city.CityCatalog;
+import com.unimove.domain.city.CityNotServedException;
 import com.unimove.domain.user.dto.AdminResetPasswordResponse;
 import com.unimove.domain.user.dto.UpdateProfileRequest;
 import com.unimove.domain.user.dto.UpdateProfileResponse;
@@ -22,6 +24,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -40,6 +43,7 @@ class UserProfileServiceTest {
     @Mock DriverRepository driverRepository;
     @Mock PasswordEncoder passwordEncoder;
     @Mock JwtService jwtService;
+    @Mock CityCatalog cityCatalog;
 
     @InjectMocks UserProfileService service;
 
@@ -215,6 +219,8 @@ class UserProfileServiceTest {
         assertThat(resp.token()).isEqualTo("novo-jwt");
         assertThat(resp.tokenExpiresAt()).isEqualTo(expires);
         assertThat(resp.profile().cidade()).isEqualTo("casa-nova");
+        // Passageiro não tem linha em drivers — nada a consultar.
+        verify(driverRepository, never()).findById(USER_ID);
     }
 
     @Test
@@ -227,5 +233,66 @@ class UserProfileServiceTest {
                 .isInstanceOf(InvalidCityException.class);
 
         assertThat(user.getCidade()).isEqualTo("remanso");
+    }
+
+    @Test
+    @DisplayName("updateProfile rejeita cidade fora da lista de atendimento sem alterar nada")
+    void updateProfileCityNotServed() {
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+        doThrow(new CityNotServedException()).when(cityCatalog).assertServed("xique-xique");
+
+        assertThatThrownBy(() -> service.updateProfile(auth,
+                new UpdateProfileRequest("Maria S. Silva", "Xique-Xique")))
+                .isInstanceOf(CityNotServedException.class);
+
+        // A validação vem antes de qualquer escrita: nem cidade nem nome mudam.
+        assertThat(user.getCidade()).isEqualTo("remanso");
+        assertThat(user.getName()).isEqualTo("Maria Silva");
+        verify(jwtService, never()).generate(user);
+    }
+
+    @Test
+    @DisplayName("motorista que troca de cidade é derrubado para offline")
+    void updateProfileDriverGoesOfflineOnCityChange() {
+        Driver driver = onlineDriver();
+        user.setRole(Role.MOTORISTA);
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+        when(driverRepository.findById(USER_ID)).thenReturn(Optional.of(driver));
+        when(jwtService.generate(user))
+                .thenReturn(new JwtService.IssuedToken("novo-jwt", Instant.now().plusSeconds(3600)));
+
+        UpdateProfileResponse resp = service.updateProfile(auth,
+                new UpdateProfileRequest("Maria Silva", "Casa Nova"));
+
+        assertThat(driver.isOnline()).isFalse();
+        assertThat(driver.getLastSeenAt()).isNotNull();
+        assertThat(resp.token()).isEqualTo("novo-jwt");
+        // O app enxerga o novo estado na mesma resposta, sem refetch do perfil.
+        assertThat(resp.profile().vehicle().online()).isFalse();
+    }
+
+    @Test
+    @DisplayName("motorista que edita só o nome continua online e não recebe token novo")
+    void updateProfileDriverStaysOnlineWhenCityUnchanged() {
+        Driver driver = onlineDriver();
+        user.setRole(Role.MOTORISTA);
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+        when(driverRepository.findById(USER_ID)).thenReturn(Optional.of(driver));
+
+        UpdateProfileResponse resp = service.updateProfile(auth,
+                new UpdateProfileRequest("Maria S. Silva", "Remanso"));
+
+        assertThat(driver.isOnline()).isTrue();
+        assertThat(resp.token()).isNull();
+        verify(jwtService, never()).generate(user);
+    }
+
+    private static Driver onlineDriver() {
+        Driver driver = new Driver();
+        driver.setVehicleType(VehicleType.MOTO);
+        driver.setVehiclePlate("ABC1D23");
+        driver.setApproved(true);
+        driver.setOnline(true);
+        return driver;
     }
 }

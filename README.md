@@ -70,6 +70,8 @@ com.unimove
 │                     polling, estimate, rating bi, taxa de cancelamento,
 │                     categorias MOTO/CARRO, earnings do motorista,
 │                     compartilhamento publico da viagem (/share/{token})
+├── domain.city       Cidades atendidas (whitelist) — porta CityCatalog,           [implementado]
+│                     `GET /cities` publico + admin de abertura/fechamento
 ├── domain.chat       Chat in-app via SSE entre passageiro e motorista             [implementado]
 ├── domain.payment    Simulacao Pix + Dinheiro (BR Code ficticio)                  [implementado]
 └── shared            Config, security, exception handler, utils                   [implementado]
@@ -179,7 +181,7 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 | Bloco                       | Status        | Observacoes |
 |-----------------------------|---------------|-------------|
 | Scaffold (pom, profiles)    | concluido     | Spring Boot 3.3.5 + Java 21 |
-| Schema (`V1`-`V20`)         | concluido     | users (com `status`, `phone_verified_at`, telefone unico e `password_hash` nullable p/ conta social), social_identities, phone_verifications, drivers, rides (com `@Version`, `share_token`, `route_geometry` e `surge_multiplier`), route_cache (com `geometry`), ride_ratings, saved_places, cancellation_fee, category, pricing_configs (com `surge_enabled`/`surge_cap`), chat_messages, ride_stops, geocode_cache |
+| Schema (`V1`-`V22`)         | concluido     | served_cities, users (com `status`, `phone_verified_at`, telefone unico e `password_hash` nullable p/ conta social), social_identities, phone_verifications, drivers, rides (com `@Version`, `share_token`, `route_geometry` e `surge_multiplier`), route_cache (com `geometry`), ride_ratings, saved_places, cancellation_fee, category, pricing_configs (com `surge_enabled`/`surge_cap`), chat_messages, ride_stops, geocode_cache |
 | `shared` (security, JWT, exception handler) | concluido | `GlobalExceptionHandler` cobre validacao, JSON ilegivel/enum invalido (400), lock otimista, `BusinessException` |
 | `domain.user`               | concluido     | `/auth/*`, online/offline, admin approve, `/saved-places`, denormalizacao de rating, **suspensao/reativacao via `/admin/users/*`** |
 | Auto-cadastro sem escalacao | concluido     | `POST /auth/register` aceita apenas `PASSAGEIRO` ou `MOTORISTA` — `ADMIN` no body devolve 400 (`@AssertTrue` no `RegisterRequest`) e a guarda em `AuthService.register` devolve 403. Admin so existe via seed/migration (`V2__seed_admin.sql`) |
@@ -198,7 +200,8 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 | Categorias MOTO/CARRO       | concluido     | Matching server-side no mural + accept, coeficientes por categoria |
 | Suspensao de usuario        | concluido     | `POST /admin/users/{id}/suspend|reactivate`; enforcement assimetrico (login + acoes de escrita) |
 | Share publico da viagem     | concluido     | `share_token` em toda ride; `GET /share/{token}` publico, 410 ao terminar |
-| Tarifa configuravel         | concluido     | `pricing_configs(cidade, category, base, per_km, per_min)` + cache em memoria; ADMIN edita via `PUT /admin/pricing` |
+| Cidades atendidas (whitelist) | concluido   | `served_cities` + `CityCatalog`. `cidade` deixou de ser texto livre: cadastro (comum e social) e `PUT /users/me` so aceitam cidade da lista (400 `"Ainda nao atendemos esta cidade."`). `GET /cities` publico alimenta o seletor do app; ADMIN abre/fecha em runtime por `POST`/`DELETE /admin/cities`, sem deploy. Desativar e **soft**: quem ja opera na cidade continua, ela so some das escolhas novas. Motorista que troca de cidade e derrubado para offline |
+| Tarifa configuravel         | concluido     | `pricing_configs(cidade, category, base, per_km, per_min)` + cache em memoria; ADMIN edita via `PUT /admin/pricing`. **Independente da whitelist**: da pra configurar a tarifa antes de abrir a cidade |
 | Surge pricing (preco dinamico) | concluido  | `SurgePolicy` — multiplicador automatico por demanda/oferta (cidade+categoria), ladder em degraus com teto; opt-in por cidade (`surge_enabled`/`surge_cap`). Congelado em `rides.surge_multiplier` no create; exposto no `estimate` |
 | Chat in-app via SSE         | concluido     | `chat_messages.seq BIGSERIAL` + `Last-Event-ID` pra reconexao; heartbeat 15s |
 | Multiplas paradas           | concluido     | `stops` (max 5) em `POST /rides`/`/estimate`; tabela `ride_stops`; rota como sequencia de waypoints |
@@ -207,9 +210,14 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 | OpenAPI / Swagger UI        | concluido     | `springdoc-openapi` em `/swagger-ui.html` |
 | Coleção HTTP / smoke test   | concluido     | `docs/api.http` + `docs/smoke-test.md` |
 
+> **Contrato do cliente ao trocar de cidade:** `PUT /users/me` devolve um `token` novo quando a cidade muda, e o app deve **substituir o JWT e reabrir os streams SSE** (`/rides/mural/stream`, `/rides/{id}/status-stream`, `/chat/rides/{id}/stream`). Os emitters do mural sao registrados por `cidade|categoria` sem `userId` (`MuralSseHub`), entao o backend nao consegue encerrar seletivamente o stream antigo — ele expira sozinho em 30 min. Sem impacto pratico: o motorista fica offline na troca e o aceite de corrida da cidade antiga ja devolve 403.
+
 ### Testes
 
-Cobertura atual (`mvn test`) — 21 classes, **196 testes**:
+Cobertura atual (`mvn test`) — 23 classes, **216 testes**:
+
+- `CityCatalogServiceTest` — guarda de cidade atendida (inexistente e desativada dao o mesmo erro), `open` normalizando o slug e reativando linha existente em vez de duplicar, nome que nao vira slug → 400, soft delete e 404 em slug desconhecido
+- `CityControllerWebMvcTest` (MockMvc) — `GET /cities`, `POST /admin/cities` 201 (nova) vs 200 (reativada), nome em branco → 400, `DELETE` → 204 e 404
 
 - `AuthControllerWebMvcTest` (MockMvc) — fluxos de register/login, `role: ADMIN` → 400 sem chegar ao service, role desconhecida → 400, `/auth/social` nos dois `status` + 401/503, `/auth/social/register` sem `verificationToken` → 400
 - `AuthServiceRegisterTest` (Mockito) — bloqueio de auto-cadastro como ADMIN antes de qualquer escrita, passageiro normalizado + token, motorista nasce `approved=false`, e-mail duplicado → 409
@@ -226,9 +234,9 @@ Cobertura atual (`mvn test`) — 21 classes, **196 testes**:
 - `SurgePolicyTest` — ladder por faixa, teto (`surge_cap`), oferta = 0 → teto, `surge_enabled = false` → 1.0x, cidade/categoria sem demanda → 1.0x
 - `RideExpirationSchedulerTest` — expiração de corridas paradas no mural (EXPIRED)
 - `DriverAutoOfflineSchedulerTest` — auto-offline de motorista por inatividade
-- `UserProfileServiceTest` — edição de perfil, troca de senha, re-emissão de JWT ao mudar cidade, conta só-social sem senha (409 explicativo) e reset pelo admin que a converte em dual
+- `UserProfileServiceTest` — edição de perfil, troca de senha, re-emissão de JWT ao mudar cidade, cidade fora da whitelist não altera nada, motorista derrubado para offline ao trocar de cidade (e mantido online quando só o nome muda), conta só-social sem senha (409 explicativo) e reset pelo admin que a converte em dual
 - `AdminMetricsServiceTest` (Mockito) — painel admin: derivação de `active`/taxas/ticket médio, defaulting do período (últimos 30 dias), range invertido → 400, agregado nulo → zeros
 
-Total: **196 testes** passando em segundos (JUnit 5 + Mockito, sem Docker/Postgres).
+Total: **216 testes** passando em segundos (JUnit 5 + Mockito, sem Docker/Postgres).
 
 > **Lock otimista:** não é exercitado em unit test (depende do `@Version` do Hibernate em runtime). A garantia vem do schema (`rides.version`) + tradução de `ObjectOptimisticLockingFailureException` para HTTP 409 no `GlobalExceptionHandler`. Valide manualmente via `docs/smoke-test.md` seção 5 (aceite por dois motoristas).

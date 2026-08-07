@@ -1,5 +1,7 @@
 package com.unimove.domain.user;
 
+import com.unimove.domain.city.CityCatalog;
+import com.unimove.domain.city.CityNotServedException;
 import com.unimove.domain.user.dto.AuthResponse;
 import com.unimove.domain.user.dto.RegisterRequest;
 import com.unimove.domain.verification.PhoneVerificationRequiredException;
@@ -22,6 +24,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -44,6 +47,7 @@ class AuthServiceRegisterTest {
     @Mock JwtService jwtService;
     @Mock LoginAttemptService loginAttemptService;
     @Mock PhoneVerificationService phoneVerificationService;
+    @Mock CityCatalog cityCatalog;
 
     private AuthService service;
 
@@ -51,7 +55,8 @@ class AuthServiceRegisterTest {
     void setUp() {
         // Clock fixo para poder asseverar phoneVerifiedAt.
         service = new AuthService(userRepository, driverRepository, passwordEncoder, jwtService,
-                loginAttemptService, phoneVerificationService, Clock.fixed(NOW, ZoneOffset.UTC));
+                loginAttemptService, phoneVerificationService, cityCatalog,
+                Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     private static RegisterRequest request(Role role, VehicleType vehicleType, String plate) {
@@ -96,6 +101,8 @@ class AuthServiceRegisterTest {
         assertThat(resp.token()).isEqualTo("jwt");
         assertThat(resp.role()).isEqualTo(Role.PASSAGEIRO);
         verify(driverRepository, never()).save(any());
+        // A whitelist é consultada com o slug normalizado, não com o texto cru.
+        verify(cityCatalog).assertServed("remanso");
     }
 
     @Test
@@ -128,6 +135,20 @@ class AuthServiceRegisterTest {
 
         verify(userRepository, never()).save(any());
         // Sem consumir o token, o usuário corrige o e-mail sem reverificar o telefone.
+        verify(phoneVerificationService, never()).consumeVerifiedPhone(anyString());
+    }
+
+    @Test
+    @DisplayName("cidade fora da lista de atendimento barra o cadastro sem gastar a verificação")
+    void registerInCityNotServedThrows() {
+        when(userRepository.existsByEmail("novo@example.com")).thenReturn(false);
+        doThrow(new CityNotServedException()).when(cityCatalog).assertServed("remanso");
+
+        assertThatThrownBy(() -> service.register(request(Role.PASSAGEIRO, null, null)))
+                .isInstanceOf(CityNotServedException.class);
+
+        verify(userRepository, never()).save(any());
+        // O desafio do WhatsApp sobrevive: o usuário corrige a cidade sem reverificar.
         verify(phoneVerificationService, never()).consumeVerifiedPhone(anyString());
     }
 
