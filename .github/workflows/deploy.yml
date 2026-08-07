@@ -90,11 +90,23 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
+      # No bootstrap o servico no Render ainda nao existe (ele so pode ser criado
+      # depois que a imagem estiver publicada). Sem o hook, pular com aviso e
+      # melhor do que falhar o build por falta de configuracao.
+      - name: Verificar configuracao do Render
+        id: cfg
+        run: |
+          if [ -z "${{ secrets.RENDER_DEPLOY_HOOK }}" ]; then
+            echo "::warning::RENDER_DEPLOY_HOOK nao configurado — deploy pulado. A imagem foi publicada no GHCR; crie o servico no Render e cadastre o secret (docs/deploy.md)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
       # Servicos que rodam imagem de registry nao redeployam sozinhos quando a
       # tag e reescrita — o deploy so acontece com este hook. O imgURL fixa o
       # SHA exato: o deploy fica versionado, e reenviar o hook com um SHA antigo
       # e o rollback.
       - name: Disparar deploy
+        if: steps.cfg.outputs.skip != 'true'
         run: |
           curl -fsS -G "${{ secrets.RENDER_DEPLOY_HOOK }}" \
             --data-urlencode "imgURL=${{ env.IMAGE }}:${{ github.sha }}"
@@ -103,6 +115,7 @@ jobs:
       # publico. O sleep inicial evita ler o health da versao ANTIGA, que ainda
       # responde nos primeiros segundos.
       - name: Aguardar o servico voltar
+        if: steps.cfg.outputs.skip != 'true'
         run: |
           sleep 45
           for i in $(seq 1 40); do
