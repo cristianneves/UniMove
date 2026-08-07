@@ -134,8 +134,10 @@ Ele le o [`render.yaml`](../render.yaml) e pergunta os valores marcados como
 > **derruba o startup de proposito**, e voce nao vai saber se o problema e o
 > deploy ou a Meta.
 
-No primeiro deploy o Flyway aplica as 20 migrations no Supabase. Acompanhe pela
-aba *Logs* do servico.
+O Flyway roda no startup. O banco do projeto `nqjbxeoednqjaqrnathm` **ja esta na
+v21** (as migrations foram aplicadas e validadas antes do primeiro deploy), entao
+o log vai dizer `Schema "public" is up to date` em vez de aplicar tudo. Num
+projeto Supabase novo, ele aplicaria as 21 de uma vez. Acompanhe pela aba *Logs*.
 
 ## 5. Secrets no GitHub
 
