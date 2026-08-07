@@ -1,0 +1,130 @@
+name: CI/CD
+
+# PR na main  -> so roda os testes (gate de merge).
+# Push na main -> testes, publica a imagem no GHCR e dispara o deploy no Render.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Dois deploys simultaneos disputariam o mesmo servico. Enfileira em vez de
+# cancelar: cancelar no meio deixaria o Render num estado indefinido.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/cristianneves/unimove
+
+jobs:
+  test:
+    name: Testes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      # A suite e toda unitaria / @WebMvcTest: nao precisa de Postgres nem
+      # de Docker. Roda em ~1min.
+      - name: mvn verify
+        run: mvn -B verify
+
+      # Reaproveitado pelo job de build: evita recompilar.
+      - name: Preparar app.jar
+        if: github.event_name != 'pull_request'
+        run: cp target/unimove-backend-*.jar app.jar
+
+      - name: Publicar artefato
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-jar
+          path: app.jar
+          retention-days: 1
+
+  build:
+    name: Imagem -> GHCR
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      # So o .dockerignore e o Dockerfile — o contexto de build e so o app.jar.
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-jar
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build e push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+
+  deploy:
+    name: Deploy no Render
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      # No bootstrap o servico no Render ainda nao existe (ele so pode ser criado
+      # depois que a imagem estiver publicada). Sem o hook, pular com aviso e
+      # melhor do que falhar o build por falta de configuracao.
+      - name: Verificar configuracao do Render
+        id: cfg
+        run: |
+          if [ -z "${{ secrets.RENDER_DEPLOY_HOOK }}" ]; then
+            echo "::warning::RENDER_DEPLOY_HOOK nao configurado — deploy pulado. A imagem foi publicada no GHCR; crie o servico no Render e cadastre o secret (docs/deploy.md)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Servicos que rodam imagem de registry nao redeployam sozinhos quando a
+      # tag e reescrita — o deploy so acontece com este hook. O imgURL fixa o
+      # SHA exato: o deploy fica versionado, e reenviar o hook com um SHA antigo
+      # e o rollback.
+      - name: Disparar deploy
+        if: steps.cfg.outputs.skip != 'true'
+        run: |
+          curl -fsS -G "${{ secrets.RENDER_DEPLOY_HOOK }}" \
+            --data-urlencode "imgURL=${{ env.IMAGE }}:${{ github.sha }}"
+
+      # O hook responde na hora, sem esperar o deploy. Confirmamos pelo endpoint
+      # publico. O sleep inicial evita ler o health da versao ANTIGA, que ainda
+      # responde nos primeiros segundos.
+      - name: Aguardar o servico voltar
+        if: steps.cfg.outputs.skip != 'true'
+        run: |
+          sleep 45
+          for i in $(seq 1 40); do
+            if curl -fsS --max-time 10 "${{ secrets.RENDER_SERVICE_URL }}/actuator/health" \
+                 | grep -q '"status":"UP"'; then
+              echo "servico UP apos $((45 + i * 15))s"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::O servico nao respondeu UP. Veja os logs em https://dashboard.render.com"
+          exit 1

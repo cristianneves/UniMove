@@ -1,0 +1,63 @@
+# Blueprint do Render — cria o web service a partir da imagem publicada no GHCR
+# pelo .github/workflows/deploy.yml. O Render NAO compila nada: os testes ja
+# rodaram no CI e a imagem chega pronta.
+#
+# Uso: Render Dashboard -> New -> Blueprint -> aponte para este repositorio.
+# Ver docs/deploy.md para o passo a passo (credencial do GHCR, Supabase, secrets).
+
+services:
+  - type: web
+    name: unimove-api
+    runtime: image
+    plan: free
+    # Entre as regioes do Render, virginia e a de menor latencia para o Brasil.
+    # O Supabase deve ficar na MESMA regiao (us-east-1): cada request faz varias
+    # idas ao banco, entao a distancia ate ele pesa mais que a do usuario ate aqui.
+    region: virginia
+    image:
+      url: ghcr.io/cristianneves/unimove:latest
+      # Nome da credencial cadastrada em Workspace Settings -> Registry Credentials
+      # (PAT do GitHub com escopo read:packages). O pacote e privado.
+      creds: ghcr-unimove
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: prod
+
+      # --- Postgres (Supabase, pooler em session mode) ---
+      # sync: false = o Render pergunta o valor na criacao e guarda cifrado;
+      # o valor nunca fica neste arquivo nem no git.
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_USER
+        sync: false
+      - key: DATABASE_PASSWORD
+        sync: false
+
+      # openssl rand -base64 48
+      - key: JWT_SECRET
+        sync: false
+
+      # --- Verificacao de telefone ---
+      # Comece em LOG. Trocar para WHATSAPP com as tres credenciais vazias
+      # derruba o startup de proposito. Ver docs/verificacao-telefone.md.
+      - key: PHONE_VERIFICATION_CHANNEL
+        value: LOG
+      - key: WHATSAPP_BUSINESS_NUMBER
+        sync: false
+      - key: WHATSAPP_APP_SECRET
+        sync: false
+      - key: WHATSAPP_WEBHOOK_VERIFY_TOKEN
+        sync: false
+
+      # --- Login social ---
+      - key: GOOGLE_LOGIN_ENABLED
+        value: "false"
+      - key: GOOGLE_CLIENT_IDS
+        sync: false
+
+      # --- Mapas ---
+      - key: OSRM_BASE_URL
+        value: https://router.project-osrm.org
+      - key: PHOTON_BASE_URL
+        value: https://photon.komoot.io

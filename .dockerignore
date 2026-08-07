@@ -1,0 +1,4 @@
+# O Dockerfile so precisa do app.jar ja compilado. Tudo o mais (src/, target/,
+# .git/, docs/) fica fora do contexto de build.
+*
+!app.jar

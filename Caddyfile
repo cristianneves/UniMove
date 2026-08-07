@@ -1,0 +1,21 @@
+# Reverse proxy + TLS da producao. Montado em /etc/caddy/Caddyfile pelo
+# docker-compose.prod.yml. O {$DOMAIN} vem do .env da VPS — migrar de
+# unimove.duckdns.org para um dominio proprio nao mexe neste arquivo.
+#
+# O Caddy pede e renova o certificado Let's Encrypt sozinho; por isso o
+# webhook da Meta (que exige HTTPS valido) e o login Google funcionam.
+
+{$DOMAIN} {
+	encode gzip
+
+	# `api` e o nome do servico no compose; resolve pela rede interna.
+	# Nao ha config de SSE aqui de proposito: o Caddy detecta
+	# `text/event-stream` e desliga o buffering sozinho, entao o mural,
+	# o chat e o status-stream atravessam sem alteracao.
+	reverse_proxy api:8080
+
+	log {
+		output stdout
+		format console
+	}
+}
