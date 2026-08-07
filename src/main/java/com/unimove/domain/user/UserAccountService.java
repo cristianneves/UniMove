@@ -14,7 +14,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 @Service
-public class UserAccountService {
+public class UserAccountService implements UserDirectory {
 
     private static final Logger log = LoggerFactory.getLogger(UserAccountService.class);
 
@@ -64,6 +64,12 @@ public class UserAccountService {
         user.setSuspendedByAdminId(null);
         log.info("Usuário {} reativado pelo admin {}", targetUserId, adminId);
         return UserStatusResponse.from(user);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public long countByCidade(String cidade) {
+        return userRepository.countByCidade(cidade);
     }
 
     @Transactional(readOnly = true)
