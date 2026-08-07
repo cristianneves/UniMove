@@ -16,9 +16,12 @@ services:
     region: virginia
     image:
       url: ghcr.io/cristianneves/unimove:latest
-      # Nome da credencial cadastrada em Workspace Settings -> Registry Credentials
-      # (PAT do GitHub com escopo read:packages). O pacote e privado.
-      creds: ghcr-unimove
+      # Referencia a credencial cadastrada em Workspace Settings -> Registry
+      # Credentials (PAT do GitHub com escopo read:packages). O pacote e privado.
+      # Aqui vai so o NOME: o segredo nunca entra neste arquivo.
+      creds:
+        fromRegistryCreds:
+          name: ghcr-unimove
     healthCheckPath: /actuator/health
     envVars:
       - key: SPRING_PROFILES_ACTIVE
