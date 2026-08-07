@@ -47,34 +47,44 @@ real em Remanso isso nao se sustenta — nesse momento a saida e um plano pago
      do usuario ate a API.
    - Guarde a senha do banco que ele gera.
 
-2. **Feche a API REST do Supabase** — passo obrigatorio, nao opcional.
-   O Supabase publica automaticamente as tabelas do schema `public` como uma API
-   REST (PostgREST) protegida por RLS. Nossas tabelas sao criadas pelo Flyway
-   **sem RLS**, entao ficariam legiveis por qualquer um com a chave `anon`, que e
-   publica: telefones, corridas, mensagens de chat.
+2. **Data API fechada — ja resolvido pela migration `V21`, nao precisa fazer nada.**
 
-   👉 *Project Settings → API → Exposed schemas* → **remova `public`**, deixe a
-   lista vazia (ou so `graphql_public`). Nos usamos o Postgres direto, nunca a
-   API do Supabase.
+   Um projeto Supabase novo vem com `ALTER DEFAULT PRIVILEGES IN SCHEMA public
+   GRANT ALL ON TABLES TO anon, authenticated`, concedido pelo role `postgres`.
+   Como o Flyway conecta como `postgres`, toda tabela criada por ele nasceria
+   com SELECT/INSERT/UPDATE/DELETE liberados para `anon` — o role por tras da
+   chave publica. Sem RLS (nao usamos: quem autoriza e o Spring Security),
+   `users`, `rides` e `chat_messages` ficariam abertos.
 
-   Confira depois do primeiro deploy:
+   A [`V21__revoke_supabase_api_access.sql`](../src/main/resources/db/migration/V21__revoke_supabase_api_access.sql)
+   revoga esses privilegios (os default e os ja concedidos) e e inofensiva fora
+   do Supabase, onde os roles `anon`/`authenticated` nao existem.
+
+   Confira depois do primeiro deploy — deve dar **401 permission denied**:
    ```bash
-   curl "https://<project-ref>.supabase.co/rest/v1/users?apikey=<anon-key>"
-   # tem que dar erro de schema desconhecido, NUNCA uma lista de usuarios
+   curl -s -w "\nHTTP %{http_code}\n" \
+     "https://<project-ref>.supabase.co/rest/v1/users?select=*" \
+     -H "apikey: <anon-key>"
    ```
+
+   > `service_role` continua com acesso: exige a chave secreta, que nunca sai do
+   > servidor, e e o que o dashboard usa. Nao a exponha em lugar nenhum.
 
 3. Pegue a string de conexao em *Connect → Session pooler* (**nao** use "Direct
    connection": ela e IPv6-only e o Render nao alcanca; e **nao** use Transaction
    mode na 6543, que quebra prepared statements do Hibernate).
 
-   Da string `postgresql://postgres.abcdefgh:SENHA@aws-0-us-east-1.pooler.supabase.com:5432/postgres`
+   Da string `postgresql://postgres.nqjbxeoednqjaqrnathm:SENHA@aws-0-<regiao>.pooler.supabase.com:5432/postgres`
    saem tres variaveis:
 
    | Variavel | Valor |
    |---|---|
-   | `DATABASE_URL` | `jdbc:postgresql://aws-0-us-east-1.pooler.supabase.com:5432/postgres?sslmode=require` |
-   | `DATABASE_USER` | `postgres.abcdefgh` (com o project-ref!) |
+   | `DATABASE_URL` | `jdbc:postgresql://aws-0-<regiao>.pooler.supabase.com:5432/postgres?sslmode=require` |
+   | `DATABASE_USER` | `postgres.nqjbxeoednqjaqrnathm` (com o project-ref!) |
    | `DATABASE_PASSWORD` | a senha do banco |
+
+   Se voce nao anotou a senha na criacao do projeto, gere outra em
+   *Project Settings → Database → Reset database password*.
 
 > O projeto free **pausa apos 7 dias sem nenhuma atividade** e so volta
 > manualmente pelo dashboard. Como o Render tambem hiberna, isso pode acontecer
