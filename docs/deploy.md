@@ -125,9 +125,13 @@ Ele le o [`render.yaml`](../render.yaml) e pergunta os valores marcados como
 | Variavel | Valor |
 |---|---|
 | `DATABASE_URL` / `DATABASE_USER` / `DATABASE_PASSWORD` | os do passo 1 |
-| `JWT_SECRET` | `openssl rand -base64 48` |
 | `WHATSAPP_*` | deixe **vazio** por enquanto |
 | `GOOGLE_CLIENT_IDS` | deixe **vazio** por enquanto |
+
+O `JWT_SECRET` **nao e perguntado**: o `render.yaml` usa `generateValue: true` e o
+Render cria um valor base64 de 256 bits sozinho. A chave de assinatura nasce
+dentro do Render e nunca passa por terminal, clipboard ou log — e um segredo que
+ninguem precisa conhecer para operar o sistema.
 
 > Suba com `PHONE_VERIFICATION_CHANNEL=LOG` e `GOOGLE_LOGIN_ENABLED=false` (ja e
 > o default no `render.yaml`). Ligar os dois de cara com credencial faltando
