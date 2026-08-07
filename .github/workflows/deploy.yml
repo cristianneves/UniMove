@@ -117,14 +117,22 @@ jobs:
       - name: Aguardar o servico voltar
         if: steps.cfg.outputs.skip != 'true'
         run: |
+          # Barra no fim do secret produz "//actuator/health", que nao casa com o
+          # permitAll do Spring Security e responde 401 — um erro que o log nao
+          # explicava, porque o GitHub mascara a URL por ser secret.
+          BASE=$(printf '%s' "${{ secrets.RENDER_SERVICE_URL }}" | sed 's:/*$::')
+
           sleep 45
           for i in $(seq 1 40); do
-            if curl -fsS --max-time 10 "${{ secrets.RENDER_SERVICE_URL }}/actuator/health" \
-                 | grep -q '"status":"UP"'; then
+            CODE=$(curl -s -o /tmp/health.json -w '%{http_code}' --max-time 10 \
+                     "$BASE/actuator/health" || echo 000)
+            if [ "$CODE" = "200" ] && grep -q '"status":"UP"' /tmp/health.json; then
               echo "servico UP apos $((45 + i * 15))s"
               exit 0
             fi
+            # 000=sem resposta, 404/401=URL errada, 502/503=ainda subindo
+            echo "tentativa $i: HTTP $CODE"
             sleep 15
           done
-          echo "::error::O servico nao respondeu UP. Veja os logs em https://dashboard.render.com"
+          echo "::error::O servico nao respondeu UP (ultimo HTTP $CODE). 401/404 indicam RENDER_SERVICE_URL errado; 502/503, deploy quebrado — veja os logs em https://dashboard.render.com"
           exit 1
