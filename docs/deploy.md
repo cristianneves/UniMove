@@ -175,6 +175,15 @@ versionado neste repositorio.
 - Verify token: o mesmo valor de `WHATSAPP_WEBHOOK_VERIFY_TOKEN`
 - Preencha as tres vars no Render e mude `PHONE_VERIFICATION_CHANNEL` para `WHATSAPP`
 
+> **Confira depois de todo sync do Blueprint.** Variaveis declaradas com `value:`
+> no `render.yaml` sao gerenciadas pelo Render e voltam ao valor do arquivo a
+> cada sync — foi assim que a producao caiu de `WHATSAPP` para `LOG` sozinha e
+> passou a servir o numero de exemplo `wa.me/5500000000000` para os usuarios,
+> sem erro nenhum no log. Os toggles operados pelo dashboard
+> (`PHONE_VERIFICATION_CHANNEL`, `GOOGLE_LOGIN_ENABLED`) usam `sync: false`
+> justamente por isso. Um `curl -X POST .../auth/phone/challenge` mostra o
+> `waLink` real e leva 5 segundos.
+
 > A Meta reenvia o webhook algumas vezes, mas se o servico estiver hibernando a
 > primeira tentativa pode expirar. Detalhes em [`verificacao-telefone.md`](./verificacao-telefone.md).
 
