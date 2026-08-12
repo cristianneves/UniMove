@@ -48,8 +48,16 @@ services:
       # --- Verificacao de telefone ---
       # Comece em LOG. Trocar para WHATSAPP com as tres credenciais vazias
       # derruba o startup de proposito. Ver docs/verificacao-telefone.md.
+      #
+      # sync: false, nao `value: LOG`. Com `value:` a variavel fica gerenciada
+      # pelo Blueprint e TODO sync reescreve o valor — a producao ja voltou
+      # sozinha para LOG depois de ligada no WHATSAPP, e o app passou a servir
+      # o numero de exemplo do LogOnlyChannel (wa.me/5500000000000) como se
+      # fosse o numero real. Sem `value`, o Render nao mexe: o canal vive no
+      # dashboard, junto das tres credenciais que ele ja precisa.
+      # Ausente => LOG, pelo default de application.yml.
       - key: PHONE_VERIFICATION_CHANNEL
-        value: LOG
+        sync: false
       - key: WHATSAPP_BUSINESS_NUMBER
         sync: false
       - key: WHATSAPP_APP_SECRET
@@ -58,8 +66,13 @@ services:
         sync: false
 
       # --- Login social ---
+      # Mesmo motivo do PHONE_VERIFICATION_CHANNEL: e um liga/desliga operado
+      # pelo dashboard, junto do GOOGLE_CLIENT_IDS. Com `value: "false"` o
+      # primeiro sync do Blueprint desligaria o login social sem aviso e
+      # /auth/social voltaria a responder 503.
+      # Ausente => false, pelo default de application.yml.
       - key: GOOGLE_LOGIN_ENABLED
-        value: "false"
+        sync: false
       - key: GOOGLE_CLIENT_IDS
         sync: false
 
