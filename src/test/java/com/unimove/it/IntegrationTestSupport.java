@@ -29,7 +29,11 @@ import java.net.http.HttpResponse;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -165,6 +169,46 @@ public abstract class IntegrationTestSupport {
     protected HttpRequest putJson(String path, String token, String body) {
         return request(path, token).header("Content-Type", "application/json")
                 .PUT(HttpRequest.BodyPublishers.ofString(body)).build();
+    }
+
+    /** Abre um stream SSE de verdade; as linhas chegam numa fila lida por {@link SseStream#await}. */
+    protected SseStream openSse(String path, String token) {
+        SseStream sse = new SseStream();
+        http.sendAsync(request(path, token).header("Accept", "text/event-stream").GET().build(),
+                        HttpResponse.BodyHandlers.ofLines())
+                .thenAcceptAsync(response -> {
+                    sse.body = response.body();
+                    sse.body.forEach(sse.lines::add);
+                });
+        return sse;
+    }
+
+    protected static final class SseStream implements AutoCloseable {
+        private final BlockingQueue<String> lines = new LinkedBlockingQueue<>();
+        private volatile Stream<String> body;
+
+        /** Proxima linha {@code data:} que contem {@code fragment}; falha apos 10 s. */
+        public String await(String fragment) {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            try {
+                while (System.nanoTime() < deadline) {
+                    String line = lines.poll(200, TimeUnit.MILLISECONDS);
+                    if (line != null && line.startsWith("data:") && line.contains(fragment)) {
+                        return line;
+                    }
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            throw new AssertionError("SSE sem evento contendo " + fragment);
+        }
+
+        @Override
+        public void close() {
+            if (body != null) {
+                body.close();
+            }
+        }
     }
 
     protected static JsonNode json(HttpResponse<String> response) {

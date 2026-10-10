@@ -24,10 +24,10 @@ Decisões do dono do produto (10/10/2026): trava no boot para a V19; piloto **s�
 
 ## 2. Contratos (QA, RF01, E2E, PASSAGEIRO)
 
-- [ ] `AuthContractIT`: desafio → cadastro com `verificationToken`; token reusado/inexistente, telefone já usado, `ADMIN`, cidade inválida, login, `/users/me`, 401/403
-- [ ] `RideJourneyIT`: estimate → criar → mural → aceite → GPS → SSE → start/complete → avaliação única → histórico; cancelamento; admin
-- [ ] `ChatContractIT`: só participante, limites de estado
-- [ ] Pagamento: `SIMULATED` ≠ `CASH` declarado
+- [x] `AuthContractIT`: desafio → cadastro com `verificationToken`; token reusado/inexistente, telefone já usado, `ADMIN`, cidade inválida, login, `/users/me`, 401/403
+- [x] `RideJourneyIT`: estimate → criar → mural → aceite → GPS → SSE → start/complete → avaliação única → histórico; cancelamento; admin
+- [x] Chat: só participante, limites de estado (dentro do `RideJourneyIT`)
+- [x] Pagamento: `SIMULATED` ≠ `CASH` declarado
 - [ ] `docs/matriz-requisitos-mvp.md`
 
 ## 3. RELEASE
