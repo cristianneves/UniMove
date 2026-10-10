@@ -1,5 +1,8 @@
 package com.unimove.domain.user;
 
+import com.unimove.domain.ride.PaymentMethod;
+import com.unimove.domain.ride.RideCategory;
+import com.unimove.domain.user.dto.UpdatePreferencesRequest;
 import com.unimove.domain.chat.ChatPrivacyPort;
 import com.unimove.domain.notification.NotificationPrivacyPort;
 import com.unimove.domain.ride.RidePrivacyPort;
@@ -180,14 +183,42 @@ class AccountPrivacyServiceTest {
     @Test
     @DisplayName("opt-in promocional grava quando; opt-out zera; transacional sempre ligado")
     void marketingOptInAndOut() {
-        PrivacyPreferencesResponse in = service.updatePreferences(auth, true);
+        PrivacyPreferencesResponse in = service.updatePreferences(auth, new UpdatePreferencesRequest(true, null, null));
         assertThat(in.marketingOptIn()).isTrue();
         assertThat(in.marketingOptInAt()).isEqualTo(NOW);
         assertThat(in.transactionalNotifications()).isTrue();
 
-        PrivacyPreferencesResponse out = service.updatePreferences(auth, false);
+        PrivacyPreferencesResponse out = service.updatePreferences(auth, new UpdatePreferencesRequest(false, null, null));
         assertThat(out.marketingOptIn()).isFalse();
         assertThat(out.marketingOptInAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("passageiro guarda pagamento e categoria preferidos; PUT sem eles limpa")
+    void passengerRidePreferences() {
+        PrivacyPreferencesResponse set = service.updatePreferences(auth,
+                new UpdatePreferencesRequest(false, PaymentMethod.PIX, RideCategory.MOTO));
+        assertThat(set.preferredPaymentMethod()).isEqualTo(PaymentMethod.PIX);
+        assertThat(set.preferredCategory()).isEqualTo(RideCategory.MOTO);
+        assertThat(service.getPreferences(auth).preferredCategory()).isEqualTo(RideCategory.MOTO);
+
+        PrivacyPreferencesResponse cleared = service.updatePreferences(auth,
+                new UpdatePreferencesRequest(false, null, null));
+        assertThat(cleared.preferredPaymentMethod()).isNull();
+        assertThat(cleared.preferredCategory()).isNull();
+    }
+
+    @Test
+    @DisplayName("motorista com pagamento/categoria preferidos → 400; so opt-in passa")
+    void driverCannotSetRidePreferences() {
+        user.setRole(Role.MOTORISTA);
+
+        assertThatThrownBy(() -> service.updatePreferences(auth,
+                new UpdatePreferencesRequest(true, null, RideCategory.CARRO)))
+                .isInstanceOf(InvalidPreferenceException.class);
+        assertThat(user.isMarketingOptIn()).isFalse();
+        assertThat(service.updatePreferences(auth, new UpdatePreferencesRequest(true, null, null))
+                .marketingOptIn()).isTrue();
     }
 
     @Test

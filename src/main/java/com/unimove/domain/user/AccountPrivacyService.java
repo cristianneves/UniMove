@@ -6,6 +6,7 @@ import com.unimove.domain.ride.RidePrivacyPort;
 import com.unimove.domain.user.document.DriverDocumentService;
 import com.unimove.domain.user.dto.DataExportResponse;
 import com.unimove.domain.user.dto.PrivacyPreferencesResponse;
+import com.unimove.domain.user.dto.UpdatePreferencesRequest;
 import com.unimove.domain.user.social.SocialIdentityRepository;
 import com.unimove.shared.event.AccountAccessRevokedEvent;
 import com.unimove.shared.security.AuthenticatedUser;
@@ -90,8 +91,16 @@ public class AccountPrivacyService {
     }
 
     @Transactional
-    public PrivacyPreferencesResponse updatePreferences(AuthenticatedUser auth, boolean marketingOptIn) {
+    public PrivacyPreferencesResponse updatePreferences(AuthenticatedUser auth, UpdatePreferencesRequest req) {
         User user = load(auth.userId());
+        boolean hasRidePreference = req.preferredPaymentMethod() != null || req.preferredCategory() != null;
+        if (hasRidePreference && user.getRole() != Role.PASSAGEIRO) {
+            throw new InvalidPreferenceException();
+        }
+        // PUT substitui: ausente = sem preferencia.
+        user.setPreferredPaymentMethod(req.preferredPaymentMethod());
+        user.setPreferredCategory(req.preferredCategory());
+        boolean marketingOptIn = req.marketingOptIn();
         if (user.isMarketingOptIn() != marketingOptIn) {
             user.setMarketingOptIn(marketingOptIn);
             // Guarda quando o opt-in foi dado; revogado, fica nulo.
@@ -164,6 +173,8 @@ public class AccountPrivacyService {
         user.setPasswordHash(null);
         user.setMarketingOptIn(false);
         user.setMarketingOptInAt(null);
+        user.setPreferredPaymentMethod(null);
+        user.setPreferredCategory(null);
         user.setStatus(UserStatus.DELETED);
         user.setDeletedAt(now);
         events.publishEvent(new AccountAccessRevokedEvent(id));
@@ -209,6 +220,8 @@ public class AccountPrivacyService {
                 user.getTermsVersion(),
                 user.getTermsAcceptedAt(),
                 privacy.termsVersion(),
-                privacy.termsVersion().equals(user.getTermsVersion()));
+                privacy.termsVersion().equals(user.getTermsVersion()),
+                user.getPreferredPaymentMethod(),
+                user.getPreferredCategory());
     }
 }

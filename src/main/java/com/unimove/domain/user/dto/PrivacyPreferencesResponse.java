@@ -1,5 +1,7 @@
 package com.unimove.domain.user.dto;
 
+import com.unimove.domain.ride.PaymentMethod;
+import com.unimove.domain.ride.RideCategory;
 import java.time.Instant;
 
 /**
@@ -15,5 +17,7 @@ public record PrivacyPreferencesResponse(
         String termsAcceptedVersion,
         Instant termsAcceptedAt,
         String currentTermsVersion,
-        boolean termsUpToDate
+        boolean termsUpToDate,
+        PaymentMethod preferredPaymentMethod,
+        RideCategory preferredCategory
 ) {}
