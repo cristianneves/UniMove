@@ -18,6 +18,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.mock.web.MockMultipartFile;
 
 import java.time.Clock;
@@ -350,6 +351,30 @@ class DriverDocumentServiceTest {
         ArgumentCaptor<String> put = ArgumentCaptor.forClass(String.class);
         verify(storage).put(put.capture(), any(), anyString());
         verify(storage).delete(List.of(put.getValue()));
+    }
+
+    @Test
+    @DisplayName("envio concorrente barrado pelo indice unico → 409 e arquivo removido")
+    void concurrentDuplicateUploadIsConflict() {
+        when(documentRepository.save(any(DriverDocument.class))).thenThrow(new DataIntegrityViolationException(
+                "dup", new RuntimeException("duplicate key value violates unique constraint \"ux_driver_documents_one_submitted\"")));
+
+        assertThatThrownBy(() -> service.upload(driverId, DriverDocumentType.CNH, file(DocumentFileInspectorTest.JPEG)))
+                .isInstanceOf(DocumentUploadNotAllowedException.class)
+                .hasMessageContaining("aguarda análise");
+        ArgumentCaptor<String> put = ArgumentCaptor.forClass(String.class);
+        verify(storage).put(put.capture(), any(), anyString());
+        verify(storage).delete(List.of(put.getValue()));
+    }
+
+    @Test
+    @DisplayName("outra violacao de integridade segue para o handler global")
+    void otherIntegrityViolationPropagates() {
+        when(documentRepository.save(any(DriverDocument.class))).thenThrow(new DataIntegrityViolationException(
+                "fk", new RuntimeException("violates foreign key constraint")));
+
+        assertThatThrownBy(() -> service.upload(driverId, DriverDocumentType.CNH, file(DocumentFileInspectorTest.JPEG)))
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test
