@@ -26,6 +26,7 @@ import com.unimove.domain.ride.dto.RideStatusEvent;
 import com.unimove.domain.ride.dto.StopPoint;
 import com.unimove.domain.ride.dto.SubmitRatingRequest;
 import com.unimove.domain.ride.dto.UpdateDriverLocationRequest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import com.unimove.domain.user.DriverService;
@@ -53,6 +54,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 @Service
 public class RideService {
@@ -150,8 +152,8 @@ public class RideService {
     public RideResponse create(AuthenticatedUser passageiro, CreateRideRequest req) {
         userAccountService.requireActive(passageiro.userId());
         // Uma corrida ativa por passageiro. Checagem barata no banco ANTES do
-        // round-trip ao OSRM. Como o metodo roda sem transacao, ha uma janela
-        // de corrida entre o exists e o save — aceitavel no MVP.
+        // round-trip ao OSRM. A janela entre o exists e o save (clique duplo) e
+        // fechada pelo indice unico parcial ux_rides_passenger_active (V23).
         if (rideRepository.existsByPassageiroIdAndStatusIn(passageiro.userId(), PASSENGER_ACTIVE_STATUSES)) {
             throw ActiveRideExistsException.forPassenger();
         }
@@ -187,12 +189,30 @@ public class RideService {
         ride.setSurgeMultiplier(surge);
         ride.setStatus(RideStatus.PENDING_PAYMENT);
 
-        Ride saved = rideRepository.save(ride);
+        Ride saved = saveGuardingActiveRide(ride, ActiveRideExistsException::forPassenger);
         log.info("Ride {} criada por passageiro {} (cidade={}, category={}, paradas={}, preco={})",
                 saved.getId(), passageiro.userId(), saved.getCidade(), category,
                 saved.getStops().size(), preco);
 
         return RideResponse.from(saved);
+    }
+
+    /**
+     * Persiste traduzindo a violacao dos indices de corrida ativa unica (V23)
+     * para o mesmo 409 da checagem por exists(). Qualquer outra violacao de
+     * integridade segue para o handler global.
+     */
+    private Ride saveGuardingActiveRide(Ride ride, Supplier<ActiveRideExistsException> conflict) {
+        try {
+            return rideRepository.save(ride);
+        } catch (DataIntegrityViolationException ex) {
+            String detail = String.valueOf(ex.getMostSpecificCause().getMessage());
+            if (detail.contains("ux_rides_passenger_active") || detail.contains("ux_rides_driver_active")) {
+                log.warn("Corrida ativa duplicada barrada pelo banco (ride {}): {}", ride.getId(), detail);
+                throw conflict.get();
+            }
+            throw ex;
+        }
     }
 
     /** Aplica o multiplicador de surge sobre a tarifa base. Compartilhado por estimate e create. */
@@ -308,7 +328,7 @@ public class RideService {
         // otimista @Version vale no UPDATE ... WHERE version=?: se outro motorista
         // aceitou primeiro, o save() lanca ObjectOptimisticLockingFailureException
         // (→ 409) e o publishStatus abaixo nem chega a rodar.
-        rideRepository.save(ride);
+        saveGuardingActiveRide(ride, ActiveRideExistsException::forDriver);
 
         log.info("Ride {} aceita pelo motorista {} (pickupEtaMin={})",
                 ride.getId(), motorista.userId(), ride.getPickupEtaMin());

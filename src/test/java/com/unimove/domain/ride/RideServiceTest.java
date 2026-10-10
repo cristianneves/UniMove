@@ -35,6 +35,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.math.BigDecimal;
@@ -133,6 +134,51 @@ class RideServiceTest {
                 .isInstanceOf(ActiveRideExistsException.class);
 
         verify(rideRepository, never()).findByIdFetchingStops(any());
+    }
+
+    @Test
+    @DisplayName("create: clique duplo que passa pelo exists() e barrado pelo indice unico → 409")
+    void createTranslatesActiveRideIndexViolation() {
+        when(mapsService.route(anyList()))
+                .thenReturn(new RouteInfo(new BigDecimal("5.000"), 12, "poly"));
+        when(pricingPolicy.calculate(any(BigDecimal.class), eq(12), any(RideCategory.class), anyString()))
+                .thenReturn(new BigDecimal("18.40"));
+        when(rideRepository.save(any(Ride.class))).thenThrow(uniqueViolation("ux_rides_passenger_active"));
+
+        assertThatThrownBy(() -> rideService.create(pax, defaultRequest()))
+                .isInstanceOf(ActiveRideExistsException.class)
+                .hasMessageContaining("pedir outra");
+    }
+
+    @Test
+    @DisplayName("create: outra violacao de integridade nao vira 409 de corrida ativa")
+    void createKeepsUnrelatedIntegrityViolations() {
+        when(mapsService.route(anyList()))
+                .thenReturn(new RouteInfo(new BigDecimal("5.000"), 12, "poly"));
+        when(pricingPolicy.calculate(any(BigDecimal.class), eq(12), any(RideCategory.class), anyString()))
+                .thenReturn(new BigDecimal("18.40"));
+        when(rideRepository.save(any(Ride.class))).thenThrow(uniqueViolation("rides_share_token_key"));
+
+        assertThatThrownBy(() -> rideService.create(pax, defaultRequest()))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @DisplayName("accept: dois aceites simultaneos do mesmo motorista → o 2o vira 409 pelo indice")
+    void acceptTranslatesDriverActiveIndexViolation() {
+        Ride ride = rideAvailable(pax.userId(), CIDADE);
+        when(rideRepository.findByIdFetchingStops(ride.getId())).thenReturn(Optional.of(ride));
+        when(rideRepository.save(any(Ride.class))).thenThrow(uniqueViolation("ux_rides_driver_active"));
+
+        assertThatThrownBy(() -> rideService.accept(mot, ride.getId()))
+                .isInstanceOf(ActiveRideExistsException.class)
+                .hasMessageContaining("aceitar outra");
+        verify(statusSseHub, never()).broadcast(any(), any());
+    }
+
+    private static DataIntegrityViolationException uniqueViolation(String constraint) {
+        return new DataIntegrityViolationException("could not execute statement",
+                new java.sql.SQLException("ERROR: duplicate key value violates unique constraint \"" + constraint + "\""));
     }
 
     // ------------------------------------------------------------------------
