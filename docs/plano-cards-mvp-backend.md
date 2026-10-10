@@ -32,10 +32,10 @@ Decisões do dono do produto (10/10/2026): trava no boot para a V19; piloto **s�
 
 ## 3. RELEASE
 
-- [ ] `docs/go-no-go-piloto.md`
+- [x] `docs/go-no-go-piloto.md` (+ Pix desligado por padrão: `PAYMENT_PIX_ENABLED`)
 
 ## 4. Fechamento
 
-- [ ] `mvn verify` + ITs contra Postgres real
-- [ ] README atualizado, push da branch
+- [x] `mvn verify` + ITs contra Postgres real (473 + 23, 0 falhas)
+- [x] README atualizado, push da branch
 - [ ] Lista de cards para mover no Trello (token é só leitura)
