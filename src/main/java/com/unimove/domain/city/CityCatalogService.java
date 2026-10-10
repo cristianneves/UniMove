@@ -1,5 +1,7 @@
 package com.unimove.domain.city;
 
+import com.unimove.domain.audit.AdminAuditLog;
+import com.unimove.domain.audit.AuditAction;
 import com.unimove.domain.city.dto.AdminCityItem;
 import com.unimove.domain.city.dto.CityItem;
 import com.unimove.domain.user.UserDirectory;
@@ -24,10 +26,13 @@ public class CityCatalogService implements CityCatalog {
 
     private final ServedCityRepository repository;
     private final UserDirectory userDirectory;
+    private final AdminAuditLog auditLog;
 
-    public CityCatalogService(ServedCityRepository repository, UserDirectory userDirectory) {
+    public CityCatalogService(ServedCityRepository repository, UserDirectory userDirectory,
+                              AdminAuditLog auditLog) {
         this.repository = repository;
         this.userDirectory = userDirectory;
+        this.auditLog = auditLog;
     }
 
     @Override
@@ -76,6 +81,7 @@ public class CityCatalogService implements CityCatalog {
         city.setDisplayName(cidade.trim());
         city.setActive(true);
         repository.save(city);
+        auditLog.record(adminId, AuditAction.CITY_OPENED, "CITY", slug, created ? "nova" : "reativada");
 
         log.info("Cidade {} ({}) aberta pelo admin {} ({})",
                 slug, city.getDisplayName(), adminId, created ? "nova" : "reativada");
@@ -95,6 +101,7 @@ public class CityCatalogService implements CityCatalog {
         ServedCity city = repository.findById(resolved == null ? "" : resolved)
                 .orElseThrow(CityNotFoundException::new);
         city.setActive(false);
+        auditLog.record(adminId, AuditAction.CITY_DEACTIVATED, "CITY", resolved, null);
         log.info("Cidade {} desativada pelo admin {} ({} contas seguem ativas ali)",
                 resolved, adminId, userDirectory.countByCidade(resolved));
     }

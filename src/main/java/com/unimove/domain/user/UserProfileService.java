@@ -1,5 +1,7 @@
 package com.unimove.domain.user;
 
+import com.unimove.domain.audit.AdminAuditLog;
+import com.unimove.domain.audit.AuditAction;
 import com.unimove.domain.city.CityCatalog;
 import com.unimove.domain.user.dto.AdminResetPasswordResponse;
 import com.unimove.domain.user.dto.UpdateProfileRequest;
@@ -32,18 +34,21 @@ public class UserProfileService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final CityCatalog cityCatalog;
+    private final AdminAuditLog auditLog;
     private final SecureRandom random = new SecureRandom();
 
     public UserProfileService(UserRepository userRepository,
                               DriverRepository driverRepository,
                               PasswordEncoder passwordEncoder,
                               JwtService jwtService,
-                              CityCatalog cityCatalog) {
+                              CityCatalog cityCatalog,
+                              AdminAuditLog auditLog) {
         this.userRepository = userRepository;
         this.driverRepository = driverRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.cityCatalog = cityCatalog;
+        this.auditLog = auditLog;
     }
 
     @Transactional(readOnly = true)
@@ -142,6 +147,7 @@ public class UserProfileService {
         }
         String temporaryPassword = generateTemporaryPassword();
         user.setPasswordHash(passwordEncoder.encode(temporaryPassword));
+        auditLog.record(adminId, AuditAction.USER_PASSWORD_RESET, "USER", targetUserId, null);
         log.warn("Senha do usuário {} resetada pelo admin {}", targetUserId, adminId);
         return new AdminResetPasswordResponse(user.getId(), user.getEmail(), temporaryPassword);
     }

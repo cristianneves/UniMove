@@ -44,6 +44,7 @@ class UserProfileServiceTest {
     @Mock PasswordEncoder passwordEncoder;
     @Mock JwtService jwtService;
     @Mock CityCatalog cityCatalog;
+    @Mock com.unimove.domain.audit.AdminAuditLog auditLog;
 
     @InjectMocks UserProfileService service;
 
@@ -140,6 +141,8 @@ class UserProfileServiceTest {
         assertThat(resp.temporaryPassword()).matches("[A-HJ-NP-Za-hj-km-np-z2-9]{10}");
         assertThat(user.getPasswordHash()).isEqualTo("hash-temporario");
         verify(passwordEncoder).encode(resp.temporaryPassword());
+        verify(auditLog).record(ADMIN_ID, com.unimove.domain.audit.AuditAction.USER_PASSWORD_RESET,
+                "USER", USER_ID, null);
     }
 
     @Test

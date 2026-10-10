@@ -1,5 +1,7 @@
 package com.unimove.domain.user;
 
+import com.unimove.domain.audit.AdminAuditLog;
+import com.unimove.domain.audit.AuditAction;
 import com.unimove.domain.user.dto.PassengerPublicInfo;
 import com.unimove.domain.user.dto.UserStatusResponse;
 import com.unimove.shared.security.AccountStatusChecker;
@@ -20,9 +22,11 @@ public class UserAccountService implements UserDirectory, AccountStatusChecker {
     private static final Logger log = LoggerFactory.getLogger(UserAccountService.class);
 
     private final UserRepository userRepository;
+    private final AdminAuditLog auditLog;
 
-    public UserAccountService(UserRepository userRepository) {
+    public UserAccountService(UserRepository userRepository, AdminAuditLog auditLog) {
         this.userRepository = userRepository;
+        this.auditLog = auditLog;
     }
 
     @Transactional(readOnly = true)
@@ -62,6 +66,7 @@ public class UserAccountService implements UserDirectory, AccountStatusChecker {
         user.setSuspendedAt(Instant.now());
         user.setSuspendedReason(reason);
         user.setSuspendedByAdminId(adminId);
+        auditLog.record(adminId, AuditAction.USER_SUSPENDED, "USER", targetUserId, reason);
         log.warn("Usuário {} suspenso pelo admin {} (motivo: {})", targetUserId, adminId, reason);
         return UserStatusResponse.from(user);
     }
@@ -74,6 +79,7 @@ public class UserAccountService implements UserDirectory, AccountStatusChecker {
         user.setSuspendedAt(null);
         user.setSuspendedReason(null);
         user.setSuspendedByAdminId(null);
+        auditLog.record(adminId, AuditAction.USER_REACTIVATED, "USER", targetUserId, null);
         log.info("Usuário {} reativado pelo admin {}", targetUserId, adminId);
         return UserStatusResponse.from(user);
     }

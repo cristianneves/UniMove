@@ -1,5 +1,7 @@
 package com.unimove.domain.user;
 
+import com.unimove.domain.audit.AdminAuditLog;
+import com.unimove.domain.audit.AuditAction;
 import com.unimove.domain.user.dto.DriverPublicInfo;
 import com.unimove.domain.user.dto.DriverStatusResponse;
 import com.unimove.domain.user.dto.PendingDriverItem;
@@ -21,13 +23,16 @@ public class DriverService {
     private final DriverRepository driverRepository;
     private final UserRepository userRepository;
     private final UserAccountService userAccountService;
+    private final AdminAuditLog auditLog;
 
     public DriverService(DriverRepository driverRepository,
                          UserRepository userRepository,
-                         UserAccountService userAccountService) {
+                         UserAccountService userAccountService,
+                         AdminAuditLog auditLog) {
         this.driverRepository = driverRepository;
         this.userRepository = userRepository;
         this.userAccountService = userAccountService;
+        this.auditLog = auditLog;
     }
 
     @Transactional(readOnly = true)
@@ -115,11 +120,12 @@ public class DriverService {
     }
 
     @Transactional
-    public DriverStatusResponse approve(UUID userId) {
+    public DriverStatusResponse approve(UUID userId, UUID adminId) {
         Driver d = driverRepository.findById(userId)
                 .orElseThrow(DriverNotFoundException::new);
         d.setApproved(true);
-        log.info("Driver {} aprovado pelo admin", userId);
+        auditLog.record(adminId, AuditAction.DRIVER_APPROVED, "USER", userId, null);
+        log.info("Driver {} aprovado pelo admin {}", userId, adminId);
         return DriverStatusResponse.from(d);
     }
 }

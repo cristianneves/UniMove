@@ -1,5 +1,7 @@
 package com.unimove.domain.ride;
 
+import com.unimove.domain.audit.AdminAuditLog;
+import com.unimove.domain.audit.AuditAction;
 import com.unimove.domain.ride.dto.PricingConfigRequest;
 import com.unimove.domain.ride.dto.PricingConfigResponse;
 import com.unimove.shared.util.CityNormalizer;
@@ -23,13 +25,16 @@ public class PricingConfigService {
     private final PricingConfigRepository repository;
     private final PricingPolicy pricingPolicy;
     private final SurgePolicy surgePolicy;
+    private final AdminAuditLog auditLog;
 
     public PricingConfigService(PricingConfigRepository repository,
                                 PricingPolicy pricingPolicy,
-                                SurgePolicy surgePolicy) {
+                                SurgePolicy surgePolicy,
+                                AdminAuditLog auditLog) {
         this.repository = repository;
         this.pricingPolicy = pricingPolicy;
         this.surgePolicy = surgePolicy;
+        this.auditLog = auditLog;
     }
 
     @Transactional(readOnly = true)
@@ -56,6 +61,10 @@ public class PricingConfigService {
         cfg.setSurgeCap(req.surgeCap() != null ? req.surgeCap() : DEFAULT_SURGE_CAP);
         cfg.setUpdatedByAdminId(adminId);
         PricingConfig saved = repository.save(cfg);
+        auditLog.record(adminId, AuditAction.PRICING_UPSERTED, "PRICING",
+                saved.getCidade() + ":" + saved.getCategory(),
+                "base=" + saved.getBase() + " perKm=" + saved.getPerKm() + " perMin=" + saved.getPerMin()
+                        + " surge=" + saved.isSurgeEnabled() + " cap=" + saved.getSurgeCap());
 
         pricingPolicy.reload();
         surgePolicy.reload();
@@ -79,6 +88,7 @@ public class PricingConfigService {
         PricingConfig cfg = repository.findByCidadeAndCategory(resolved, category)
                 .orElseThrow(PricingConfigNotFoundException::new);
         repository.delete(cfg);
+        auditLog.record(adminId, AuditAction.PRICING_DELETED, "PRICING", resolved + ":" + category, null);
 
         pricingPolicy.reload();
         surgePolicy.reload();
