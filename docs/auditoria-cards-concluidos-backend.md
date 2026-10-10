@@ -98,3 +98,35 @@ A primeira auditoria encontrou 1 card não implementado, 3 cards que prometiam a
 - **Bugs que só a validação real pegou, ambos corrigidos com teste de regressão:**
   - o boot falhava pelo construtor duplicado da `FieldCrypto`;
   - aparecia um ERROR no fim do SSE de conta revogada.
+
+---
+
+## 7. Reauditoria de 10/10/2026
+
+Os 29 cards da lista **Concluídas** foram conferidos de novo contra a `main` (`13bab6c`), na branch `fix/reauditoria-cards-concluidos`. O backend de todos existia. Os achados abaixo foram corrigidos.
+
+### Bugs
+- [x] **Link de compartilhamento inacessível.** O `share_token` nunca saía na API, então o `/share/{token}` não tinha como ser usado (card [RNF05] LGPD, item 4). Correção: `GET /rides/{id}/share-link`, só para o passageiro dono e só com a corrida viva.
+- [x] **Envio duplicado de documento travava a fila.** Um clique duplo criava dois `SUBMITTED` e o mais antigo não podia ser analisado (card [RF02] Envio privado). Correção: a V33 saneia as duplicatas e cria o índice único parcial; a violação vira 409 e o arquivo é removido.
+
+### Ressalvas
+- [x] **Estados do documento** (card [RF02/RF10]): mantidos `SUBMITTED`/`APPROVED`/`REJECTED`. A equivalência com o card ficou documentada em `docs/contrato-mvp-backend-gaps.md` §8.
+- [x] **Preferências operacionais** (card [PERFIL][P1]): pagamento e categoria preferidos do passageiro (V34).
+- [x] **Token antigo após trocar de cidade** (card [AUTH] Troca de senha e token): a troca agora revoga as sessões anteriores e encerra os streams.
+- [x] **Placa com e sem hífen**: `VehiclePlate` valida e normaliza em todo cadastro; a V35 normaliza as placas já salvas.
+- [x] **`?sort=` inválido → 500**: confirmado contra o Postgres real; agora responde 400.
+- [x] **Swagger público**: agora só ADMIN, com tela de login própria em `/docs/login`.
+- [x] **Sem teste contra o banco real**: 7 testes de integração (`*IT`, Failsafe, `IT_DATABASE_URL`).
+
+### Validação
+- 461 testes unitários e 7 de integração contra Postgres 16, todos passando. As migrations V1–V35 aplicam com `ddl-auto=validate`.
+- O log dos IT mostra as três travas do banco acionadas por requisições realmente simultâneas:
+  - lock otimista no aceite;
+  - `ux_rides_passenger_active` no pedido;
+  - `ux_driver_documents_one_submitted` no envio de documento.
+- A deduplicação da V33 foi conferida com duplicatas sintéticas: mantém o envio mais novo e reprova os demais.
+- **Bug que só o teste real pegou:** o Spring Boot gera redirects absolutos por padrão (`http://host:porta-interna`), o que quebraria o login do Swagger atrás do Caddy. Foi corrigido com `server.tomcat.use-relative-redirects`.
+
+### Pendente — operação
+- [ ] Após o deploy, entrar em `/docs/login` com o admin (depois de trocar a senha temporária) e conferir o Swagger em produção.
+- [ ] O app precisa tratar as mudanças 8–10 do contrato (§8): sessão revogada na troca de cidade, placa validada no cadastro e 409 no envio duplicado.

@@ -60,7 +60,7 @@ Admin: `GET /admin/drivers/{id}/documentation`, `GET .../documents/{docId}/file`
 
 4. **`PUT /users/me/password` devolve 200 com `AuthResponse`** (era 204 sem corpo). A troca **revoga todos os tokens anteriores**: o app precisa substituir o JWT pelo `token` da resposta e reabrir os streams SSE.
 5. **`AuthResponse` ganha `mustChangePassword`.** Com `true` (senha temporária do reset), a API só aceita `PUT /users/me/password` e `GET /users/me`; o resto volta 403 *"Troque a senha temporária..."*. O app deve abrir a tela de troca.
-6. **Novo 401 `"Sessão encerrada porque a senha foi alterada. Entre novamente."`**: aparece em token emitido antes de uma troca ou reset. O app deve voltar ao login.
+6. **Novo 401 `"Sessão encerrada por alteração na conta (senha ou cidade). Entre novamente."`**: aparece em token emitido antes de uma troca de senha, reset ou troca de cidade. O app deve voltar ao login.
 7. **`GET /admin/drivers/pending` virou paginado** (`Page`: `content`, `totalElements`...) e cada item traz `documentationStatus`.
 
 ### Corrida
@@ -95,3 +95,35 @@ Admin: `GET /admin/drivers/{id}/documentation`, `GET .../documents/{docId}/file`
 ### Documentos do motorista
 - `profile.cnhCheckDigitValid` (admin e motorista): sinal do dígito verificador da CNH. Não bloqueia.
 - **Upload:** a foto é regravada no servidor, então o EXIF e a localização GPS da foto não são guardados. Imagem corrompida → 400; PDF com script ou anexo → 400.
+
+---
+
+## 8. Terceiro ciclo (reauditoria de 10/10/2026)
+
+### ⚠️ Mudanças que o app precisa tratar
+
+8. **Trocar de cidade revoga as outras sessões.** `PUT /users/me` com cidade nova devolve `token`. Esse token vale; os anteriores, inclusive em outros aparelhos, passam a responder 401 (mensagem do item 6). Os streams SSE abertos com eles são encerrados.
+9. **Placa validada no cadastro** (`/auth/register` e `/auth/social/register`): só `ABC1234` ou `ABC1D23` (hífen opcional). Fora disso → 400 em `fieldErrors.vehiclePlate`. A placa é guardada sem hífen e em maiúsculas.
+10. **Envio duplicado de documento** (clique duplo) → **409** *"Este documento já foi enviado e aguarda análise."*. Antes, o segundo envio ficava preso na fila do admin.
+
+### Corrida
+- **`GET /rides/{id}/share-link`** (passageiro dono) → `{"token":"…","path":"/share/{token}"}`. O app monta a URL com o host da API e compartilha. Com a corrida encerrada → 410; se não for o dono → 403. Antes não havia como obter o token, então o `/share/{token}` era inalcançável.
+- `?sort=` com campo inexistente nas listas paginadas → **400** *"Parâmetro de ordenação inválido."* (era 500).
+
+### Preferências
+- `GET/PUT /users/me/preferences` ganha `preferredPaymentMethod` (`PIX`/`DINHEIRO`) e `preferredCategory` (`MOTO`/`CARRO`). O app usa os dois para pré-selecionar o pedido.
+- O PUT **substitui** as preferências: se o campo vier ausente, a preferência é apagada. Por isso o app deve reenviar os valores atuais junto com o `marketingOptIn`.
+- Esses dois campos são só do passageiro: motorista que os envia recebe 400.
+
+### Estados do documento — equivalência com o card RF02/RF10
+O backend usa 3 estados por envio e um consolidado derivado. Não existe `UNDER_REVIEW` separado porque só um papel (ADMIN) analisa.
+
+| Card | Backend (por envio, `DriverDocumentStatus`) | Consolidado (`documentationStatus`) |
+|---|---|---|
+| `DRAFT` | (nenhum envio do tipo) | `INCOMPLETE` |
+| `SUBMITTED` / `UNDER_REVIEW` | `SUBMITTED` | `PENDING_REVIEW` |
+| `APPROVED` | `APPROVED` | `APPROVED` (ou `EXPIRED` se a CNH venceu) |
+| `REJECTED` | `REJECTED` + `rejectionReason` | `REJECTED` |
+
+### Swagger
+- `/swagger-ui.html` e `/v3/api-docs` agora exigem login de **ADMIN** em `/docs/login`. Isso não afeta o app; afeta só quem usa a documentação.

@@ -52,7 +52,17 @@ API sobe em `http://localhost:8080`. Migrations Flyway aplicam automaticamente n
 mvn test
 ```
 
-Os testes sao unitarios (JUnit 5 + Mockito) e nao dependem de Postgres nem de Docker — rodam em segundos. Validacao com banco real e feita manualmente via `docs/smoke-test.md` + `docs/api.http`.
+Os testes unitarios (JUnit 5 + Mockito) nao dependem de Postgres nem de Docker — rodam em segundos.
+
+Os testes de integracao (`*IT.java`, Failsafe) sobem a API inteira contra um **Postgres real** e cobrem o que so o banco garante (lock otimista, indices parciais, queries). Sem `IT_DATABASE_URL` eles sao pulados:
+
+```bash
+docker run -d --rm --name unimove-it -p 55432:5432 -e POSTGRES_PASSWORD=it postgres:16
+IT_DATABASE_URL=jdbc:postgresql://localhost:55432/postgres ./mvnw verify
+docker stop unimove-it
+```
+
+(`IT_DATABASE_USER`/`IT_DATABASE_PASSWORD` tem default `postgres`/`it`. Testcontainers nao e usado porque nao roda no Docker Desktop do time.)
 
 ---
 
@@ -86,8 +96,8 @@ com.unimove
 
 ## Documentacao da API
 
-- **Swagger UI:** `http://localhost:8080/swagger-ui.html`
-- **OpenAPI JSON:** `http://localhost:8080/v3/api-docs`
+- **Swagger UI:** `http://localhost:8080/swagger-ui.html` — **restrito a ADMIN**: abre a tela de login em `/docs/login` (e-mail/senha de admin, com o mesmo lockout do app; admin com senha temporaria troca no app antes). Para o "Try it out", cole um JWT no botao **Authorize**.
+- **OpenAPI JSON:** `http://localhost:8080/v3/api-docs` (mesma sessao de admin)
 - **Coleção HTTP versionada:** [`docs/api.http`](./docs/api.http) — abre direto no IntelliJ HTTP Client ou VSCode REST Client.
 - **Smoke test ponta-a-ponta:** [`docs/smoke-test.md`](./docs/smoke-test.md) — checklist manual de ~10 min para validar release.
 - **Estado atual:** [`docs/estado-atual-projeto.md`](./docs/estado-atual-projeto.md) — snapshot do que existe e do fluxo ponta-a-ponta.
@@ -199,7 +209,7 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 | Bloco                       | Status        | Observacoes |
 |-----------------------------|---------------|-------------|
 | Scaffold (pom, profiles)    | concluido     | Spring Boot 3.3.5 + Java 21 |
-| Schema (`V1`-`V32`)         | concluido     | V29 revogacao de sessao/senha temporaria, V30 cancelamento admin, V31 CPF/CNH cifrados, V32 notificacoes. V23–V28: corrida ativa unica no banco, precisao do GPS, pagamento em dinheiro, auditoria admin, documentos do motorista, consentimento/exclusao (LGPD). |
+| Schema (`V1`-`V35`)         | concluido     | V33 um unico envio de documento em analise por tipo (indice parcial), V34 pagamento/categoria preferidos, V35 placas normalizadas. V29 revogacao de sessao/senha temporaria, V30 cancelamento admin, V31 CPF/CNH cifrados, V32 notificacoes. V23–V28: corrida ativa unica no banco, precisao do GPS, pagamento em dinheiro, auditoria admin, documentos do motorista, consentimento/exclusao (LGPD). |
 | Schema ate `V22`            | concluido     | served_cities, users (com `status`, `phone_verified_at`, telefone unico e `password_hash` nullable p/ conta social), social_identities, phone_verifications, drivers, rides (com `@Version`, `share_token`, `route_geometry` e `surge_multiplier`), route_cache (com `geometry`), ride_ratings, saved_places, cancellation_fee, category, pricing_configs (com `surge_enabled`/`surge_cap`), chat_messages, ride_stops, geocode_cache |
 | `shared` (security, JWT, exception handler) | concluido | `GlobalExceptionHandler` cobre validacao, JSON ilegivel/enum invalido (400), lock otimista, `BusinessException` |
 | `domain.user`               | concluido     | `/auth/*`, online/offline, admin approve, `/saved-places`, denormalizacao de rating, **suspensao/reativacao via `/admin/users/*`** |
@@ -229,7 +239,8 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 | Notificacoes / campanhas    | concluido     | `domain.notification`: campanhas so para quem deu opt-in, segmentadas por cidade/papel, com previa, historico e auditoria; caixa de entrada `GET /notifications` |
 | Retencao LGPD               | concluido     | Job diario anonimiza corridas > 5 anos e apaga arquivos de documento obsoletos > 90 dias |
 | Privacidade (LGPD)          | concluido     | `GET /legal/terms`, `termsVersion` obrigatorio no cadastro, `POST /users/me/terms`, `GET/PUT /users/me/preferences` (opt-in promocional), `GET /users/me/data-export`, `DELETE /users/me` (anonimizacao imediata). Ver `docs/lgpd-inventario-dados.md` |
-| Share publico da viagem     | concluido     | `share_token` em toda ride; `GET /share/{token}` publico, 410 ao terminar |
+| Share publico da viagem     | concluido     | `share_token` em toda ride; o passageiro dono obtem o link em `GET /rides/{id}/share-link` (so com a corrida viva); `GET /share/{token}` publico, 410 ao terminar |
+| Preferencias do pedido      | concluido     | `GET/PUT /users/me/preferences` guarda `preferredPaymentMethod`/`preferredCategory` do passageiro (pre-selecao no app); motorista → 400 |
 | Cidades atendidas (whitelist) | concluido   | `served_cities` + `CityCatalog`. `cidade` deixou de ser texto livre: cadastro (comum e social) e `PUT /users/me` so aceitam cidade da lista (400 `"Ainda nao atendemos esta cidade."`). `GET /cities` publico alimenta o seletor do app; ADMIN abre/fecha em runtime por `POST`/`DELETE /admin/cities`, sem deploy. Desativar e **soft**: quem ja opera na cidade continua, ela so some das escolhas novas. Motorista que troca de cidade e derrubado para offline |
 | Tarifa configuravel         | concluido     | `pricing_configs(cidade, category, base, per_km, per_min)` + cache em memoria; ADMIN edita via `PUT /admin/pricing`. **Independente da whitelist**: da pra configurar a tarifa antes de abrir a cidade |
 | Surge pricing (preco dinamico) | concluido  | `SurgePolicy` — multiplicador automatico por demanda/oferta (cidade+categoria), ladder em degraus com teto; opt-in por cidade (`surge_enabled`/`surge_cap`). Congelado em `rides.surge_multiplier` no create; exposto no `estimate` |
@@ -237,14 +248,14 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 | Multiplas paradas           | concluido     | `stops` (max 5) em `POST /rides`/`/estimate`; tabela `ride_stops`; rota como sequencia de waypoints |
 | Geometria da rota (mapa)    | concluido     | OSRM `overview=full&geometries=polyline`; `GET /rides/{id}/route`, polyline no estimate/share; `route_geometry` + `route_cache.geometry` |
 | Busca de endereco (geocoding) | concluido   | `GET /maps/geocode` (autocomplete) + `GET /maps/reverse` (pin) via Photon; `reverse` cacheado em `geocode_cache` |
-| OpenAPI / Swagger UI        | concluido     | `springdoc-openapi` em `/swagger-ui.html` |
+| OpenAPI / Swagger UI        | concluido     | `springdoc-openapi` em `/swagger-ui.html`, so para ADMIN via login em `/docs/login` (cadeia de seguranca propria com sessao + CSRF; a API segue stateless) |
 | Coleção HTTP / smoke test   | concluido     | `docs/api.http` + `docs/smoke-test.md` |
 
-> **Contrato do cliente ao trocar de cidade:** `PUT /users/me` devolve um `token` novo quando a cidade muda, e o app deve **substituir o JWT e reabrir os streams SSE** (`/rides/mural/stream`, `/rides/{id}/status-stream`, `/chat/rides/{id}/stream`). Os emitters do mural sao registrados por `cidade|categoria` sem `userId` (`MuralSseHub`), entao o backend nao consegue encerrar seletivamente o stream antigo — ele expira sozinho em 30 min. Sem impacto pratico: o motorista fica offline na troca e o aceite de corrida da cidade antiga ja devolve 403.
+> **Contrato do cliente ao trocar de cidade:** `PUT /users/me` devolve um `token` novo quando a cidade muda, e o app deve **substituir o JWT e reabrir os streams SSE** (`/rides/mural/stream`, `/rides/{id}/status-stream`, `/chat/rides/{id}/stream`). Todos os tokens anteriores sao revogados (401 `"Sessão encerrada por alteração na conta (senha ou cidade)..."`, inclusive em outros aparelhos) e os streams abertos com eles sao encerrados pelo backend.
 
 ### Testes
 
-Cobertura atual (`mvn test`) — **422 testes**. Segundo ciclo: `NotificationServiceTest`, `FieldCryptoTest`, `FieldCryptoSpringWiringTest`, `CnhTest`, `UserStreamRegistryTest`, `ClientIpTest`, `RideRetentionSchedulerTest`, `DocumentRetentionSchedulerTest`, `AdminRideControllerWebMvcTest` e casos novos nos testes de servico. Primeiro ciclo:
+Cobertura atual (`mvn test`) — **461 testes unitarios** + **7 de integracao** (`mvn verify` com `IT_DATABASE_URL`). Reauditoria de 10/10/2026: `RideIT` (aceite concorrente por dois motoristas → 200/409, clique duplo no pedido, `?sort=` invalido → 400, link de compartilhamento), `DriverDocumentIT` (envio duplicado concorrente → 201/409), `SessionAndDocsIT` (revogacao por troca de cidade, login do Swagger), alem de `RideShareServiceTest`, `DocsAuthenticationProviderTest`, `DocsSecurityWebMvcTest`, `VehiclePlateTest` e `GlobalExceptionHandlerTest`. Segundo ciclo: `NotificationServiceTest`, `FieldCryptoTest`, `FieldCryptoSpringWiringTest`, `CnhTest`, `UserStreamRegistryTest`, `ClientIpTest`, `RideRetentionSchedulerTest`, `DocumentRetentionSchedulerTest`, `AdminRideControllerWebMvcTest` e casos novos nos testes de servico. Primeiro ciclo:
 
 - `SecurityWebMvcTest` — cadeia de seguranca real: 401 sem/token adulterado, 403 por role, conta suspensa (403) e excluida (401) com token ainda valido, rota publica com token bloqueado, acesso cruzado (BOLA)
 - `RateLimitFilterTest`, `UserAccountServiceTest`, `DriverServiceTest`, `AdminAuditServiceTest`
@@ -276,6 +287,6 @@ Ja existentes:
 - `UserProfileServiceTest` — edição de perfil, troca de senha, re-emissão de JWT ao mudar cidade, cidade fora da whitelist não altera nada, motorista derrubado para offline ao trocar de cidade (e mantido online quando só o nome muda), conta só-social sem senha (409 explicativo) e reset pelo admin que a converte em dual
 - `AdminMetricsServiceTest` (Mockito) — painel admin: derivação de `active`/taxas/ticket médio, defaulting do período (últimos 30 dias), range invertido → 400, agregado nulo → zeros
 
-Total: **422 testes** passando em segundos (JUnit 5 + Mockito, sem Docker/Postgres). As migrations V1–V28, o `ddl-auto=validate` e as queries JPQL foram validados subindo a API num Postgres 16 real, com smoke E2E ponta a ponta (ver `docs/homologacao-runbook.md`).
+Total: **461 testes unitarios** passando em segundos (JUnit 5 + Mockito, sem Docker/Postgres) e **7 de integracao** contra Postgres 16 real, que aplicam as migrations V1–V35 com `ddl-auto=validate`.
 
-> **Lock otimista:** não é exercitado em unit test (depende do `@Version` do Hibernate em runtime). A garantia vem do schema (`rides.version`) + tradução de `ObjectOptimisticLockingFailureException` para HTTP 409 no `GlobalExceptionHandler`. Valide manualmente via `docs/smoke-test.md` seção 5 (aceite por dois motoristas).
+> **Lock otimista e indices parciais:** exercitados de verdade pelos IT — duas requisicoes simultaneas batem no `@Version` (aceite) e nos indices `ux_rides_passenger_active`/`ux_driver_documents_one_submitted`, e cada uma vira 409.
