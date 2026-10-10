@@ -56,10 +56,8 @@ public class SecurityConfig {
                                 // Versao e link da politica de privacidade: exibidos
                                 // na tela de cadastro, antes de existir token.
                                 "/legal/**",
-                                "/actuator/health",
-                                "/v3/api-docs/**",
-                                "/swagger-ui/**",
-                                "/swagger-ui.html"
+                                // Swagger: cadeia propria com login de admin (DocsSecurityConfig).
+                                "/actuator/health"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )

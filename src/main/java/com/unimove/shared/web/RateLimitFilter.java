@@ -49,7 +49,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private static final Logger log = LoggerFactory.getLogger(RateLimitFilter.class);
 
     private static final Set<String> AUTH_PATHS = Set.of(
-            "/auth/login", "/auth/register", "/auth/social", "/auth/social/register");
+            "/auth/login", "/auth/register", "/auth/social", "/auth/social/register", "/docs/login");
     private static final String MAPS_PREFIX = "/maps/";
 
     private final ObjectMapper objectMapper;
