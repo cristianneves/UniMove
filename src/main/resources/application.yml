@@ -70,6 +70,10 @@ app:
       # Android com serverClientId devolve o client ID WEB, iOS devolve o client ID iOS.
       client-ids: ${GOOGLE_CLIENT_IDS:}
       jwk-set-uri: ${GOOGLE_JWK_SET_URI:https://www.googleapis.com/oauth2/v3/certs}
+  privacy:
+    # Versao vigente dos termos + politica (GET /legal/terms). Trocar exige novo aceite no cadastro.
+    terms-version: ${PRIVACY_TERMS_VERSION:2026-10}
+    policy-url: ${PRIVACY_POLICY_URL:https://unimove.app/privacidade}
   storage:
     supabase:
       # Bucket PRIVADO dos documentos do motorista (CNH/CRLV/selfie). Sem url/key o

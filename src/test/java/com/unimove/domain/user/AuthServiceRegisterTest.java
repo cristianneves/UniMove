@@ -49,6 +49,8 @@ class AuthServiceRegisterTest {
     @Mock PhoneVerificationService phoneVerificationService;
     @Mock CityCatalog cityCatalog;
 
+    private static final String TERMS = "2026-10";
+
     private AuthService service;
 
     @BeforeEach
@@ -56,12 +58,12 @@ class AuthServiceRegisterTest {
         // Clock fixo para poder asseverar phoneVerifiedAt.
         service = new AuthService(userRepository, driverRepository, passwordEncoder, jwtService,
                 loginAttemptService, phoneVerificationService, cityCatalog,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+                new PrivacyProperties(TERMS, "https://x/privacidade"), Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     private static RegisterRequest request(Role role, VehicleType vehicleType, String plate) {
         return new RegisterRequest("novo@example.com", "senha12345", "  Maria Silva  ", TOKEN,
-                role, "Remanso", vehicleType, plate);
+                role, "Remanso", vehicleType, plate, TERMS);
     }
 
     @Test
@@ -97,12 +99,26 @@ class AuthServiceRegisterTest {
         assertThat(saved.getCidade()).isEqualTo("remanso");
         assertThat(saved.getPhone()).isEqualTo(VERIFIED_PHONE);
         assertThat(saved.getPhoneVerifiedAt()).isEqualTo(NOW);
+        assertThat(saved.getTermsVersion()).isEqualTo(TERMS);
+        assertThat(saved.getTermsAcceptedAt()).isEqualTo(NOW);
 
         assertThat(resp.token()).isEqualTo("jwt");
         assertThat(resp.role()).isEqualTo(Role.PASSAGEIRO);
         verify(driverRepository, never()).save(any());
         // A whitelist é consultada com o slug normalizado, não com o texto cru.
         verify(cityCatalog).assertServed("remanso");
+    }
+
+    @Test
+    @DisplayName("termos de versao antiga → 400 sem consumir o desafio do WhatsApp")
+    void registerRequiresCurrentTerms() {
+        when(userRepository.existsByEmail("novo@example.com")).thenReturn(false);
+        RegisterRequest old = new RegisterRequest("novo@example.com", "senha12345", "Maria", TOKEN,
+                Role.PASSAGEIRO, "Remanso", null, null, "2025-01");
+
+        assertThatThrownBy(() -> service.register(old)).isInstanceOf(TermsNotAcceptedException.class);
+        verify(phoneVerificationService, never()).consumeVerifiedPhone(anyString());
+        verify(userRepository, never()).save(any());
     }
 
     @Test

@@ -147,6 +147,21 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
                                                @Param("status") RideStatus status,
                                                Pageable pageable);
 
+    /** Exportacao LGPD: toda corrida em que o usuario participou, em qualquer papel. */
+    @Query("""
+            SELECT new com.unimove.domain.ride.dto.RideHistoryItem(
+                r.id, r.status, r.cidade, r.category,
+                r.latOrigem, r.lngOrigem, r.latDestino, r.lngDestino,
+                r.distanciaKm, r.tempoMin, r.preco, r.cancellationFee, r.paymentMethod, r.paymentStatus,
+                r.passageiroId, r.motoristaId,
+                r.createdAt, r.completedAt, r.cancelledAt
+            )
+            FROM Ride r
+            WHERE r.passageiroId = :userId OR r.motoristaId = :userId
+            ORDER BY r.createdAt DESC
+            """)
+    List<RideHistoryItem> findAllForParticipant(@Param("userId") UUID userId);
+
     @Query("""
             SELECT new com.unimove.domain.ride.dto.EarningsAggregate(
                 COUNT(r), COALESCE(SUM(r.preco), 0)

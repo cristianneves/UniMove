@@ -51,6 +51,7 @@ public class UserAccountService implements UserDirectory, AccountStatusChecker {
                 .map(status -> switch (status) {
                     case ACTIVE -> AccountState.ACTIVE;
                     case SUSPENDED -> AccountState.SUSPENDED;
+                    case DELETED -> AccountState.GONE;
                 })
                 .orElse(AccountState.GONE);
     }

@@ -70,7 +70,8 @@ class SocialAuthServiceTest {
 
     private SocialAuthService newService(List<SocialIdentityVerifier> verifiers) {
         return new SocialAuthService(verifiers, userRepository, driverRepository, socialIdentityRepository,
-                phoneVerificationService, jwtService, cityCatalog, Clock.fixed(NOW, ZoneOffset.UTC));
+                phoneVerificationService, jwtService, cityCatalog,
+                new PrivacyProperties("2026-10", "https://x/privacidade"), Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     /** Encurta o arranjo: o provedor devolve a identidade pedida. */
@@ -105,7 +106,7 @@ class SocialAuthServiceTest {
 
     private static SocialRegisterRequest registerRequest(Role role, VehicleType type, String plate) {
         return new SocialRegisterRequest(SocialProvider.GOOGLE, ID_TOKEN, PHONE_TOKEN,
-                role, "Remanso", type, plate);
+                role, "Remanso", type, plate, "2026-10");
     }
 
     // ---------- login ----------
@@ -254,6 +255,20 @@ class SocialAuthServiceTest {
         verify(phoneVerificationService, never()).consumeVerifiedPhone(anyString());
         verify(userRepository, never()).save(any());
         verify(socialIdentityRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("cadastro social sem aceitar os termos vigentes → 400 sem gastar a verificação")
+    void registerRequiresCurrentTerms() {
+        givenVerifiedIdentity(true);
+        when(socialIdentityRepository.findByProviderAndSubject(SocialProvider.GOOGLE, SUBJECT))
+                .thenReturn(Optional.empty());
+        when(userRepository.existsByEmail(EMAIL)).thenReturn(false);
+        SocialRegisterRequest old = new SocialRegisterRequest(SocialProvider.GOOGLE, ID_TOKEN, PHONE_TOKEN,
+                Role.PASSAGEIRO, "Remanso", null, null, "2025-01");
+
+        assertThatThrownBy(() -> service.register(old)).isInstanceOf(TermsNotAcceptedException.class);
+        verify(phoneVerificationService, never()).consumeVerifiedPhone(anyString());
     }
 
     @Test

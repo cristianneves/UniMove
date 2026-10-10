@@ -28,6 +28,7 @@ public class AuthService {
     private final LoginAttemptService loginAttemptService;
     private final PhoneVerificationService phoneVerificationService;
     private final CityCatalog cityCatalog;
+    private final PrivacyProperties privacy;
     private final Clock clock;
 
     public AuthService(UserRepository userRepository,
@@ -37,6 +38,7 @@ public class AuthService {
                        LoginAttemptService loginAttemptService,
                        PhoneVerificationService phoneVerificationService,
                        CityCatalog cityCatalog,
+                       PrivacyProperties privacy,
                        Clock clock) {
         this.userRepository = userRepository;
         this.driverRepository = driverRepository;
@@ -45,6 +47,7 @@ public class AuthService {
         this.loginAttemptService = loginAttemptService;
         this.phoneVerificationService = phoneVerificationService;
         this.cityCatalog = cityCatalog;
+        this.privacy = privacy;
         this.clock = clock;
     }
 
@@ -68,6 +71,10 @@ public class AuthService {
         // no rollback, mas nao ha razao para gastar o token com um cadastro que
         // ja sabemos invalido.
         cityCatalog.assertServed(cidade);
+        // Tambem antes do WhatsApp: sem consentimento nao ha cadastro.
+        if (!privacy.termsVersion().equals(req.termsVersion())) {
+            throw new TermsNotAcceptedException(privacy.termsVersion());
+        }
 
         // O telefone vem do desafio verificado (wa_id entregue pela Meta), nunca
         // do formulario. Roda dentro desta transacao de proposito: se o cadastro
@@ -76,6 +83,8 @@ public class AuthService {
         String verifiedPhone = phoneVerificationService.consumeVerifiedPhone(req.verificationToken());
 
         User user = new User();
+        user.setTermsVersion(req.termsVersion());
+        user.setTermsAcceptedAt(clock.instant());
         user.setEmail(email);
         user.setPasswordHash(passwordEncoder.encode(req.password()));
         user.setName(req.name().trim());

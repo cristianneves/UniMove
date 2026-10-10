@@ -48,6 +48,9 @@ public class SecurityConfig {
                                 // para montar o seletor da tela de cadastro,
                                 // antes de existir qualquer token.
                                 "/cities",
+                                // Versao e link da politica de privacidade: exibidos
+                                // na tela de cadastro, antes de existir token.
+                                "/legal/**",
                                 "/actuator/health",
                                 "/v3/api-docs/**",
                                 "/swagger-ui/**",

@@ -72,6 +72,23 @@ public class User {
     @Column(name = "suspended_by_admin_id")
     private UUID suspendedByAdminId;
 
+    /** Versao dos termos/politica de privacidade aceita e quando (V28). */
+    @Column(name = "terms_version", length = 20)
+    private String termsVersion;
+
+    @Column(name = "terms_accepted_at")
+    private Instant termsAcceptedAt;
+
+    /** Comunicacao promocional so com opt-in explicito. */
+    @Column(name = "marketing_opt_in", nullable = false)
+    private boolean marketingOptIn;
+
+    @Column(name = "marketing_opt_in_at")
+    private Instant marketingOptInAt;
+
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
+
     @PrePersist
     void onCreate() {
         if (id == null) {

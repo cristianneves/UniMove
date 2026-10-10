@@ -51,7 +51,7 @@ class AuthControllerWebMvcTest {
     void registerReturns201WithBody() throws Exception {
         RegisterRequest req = new RegisterRequest(
                 "p@example.com", "senha12345", "Maria", "token-verificado",
-                Role.PASSAGEIRO, "Campinas", null, null
+                Role.PASSAGEIRO, "Campinas", null, null, "2026-10"
         );
         AuthResponse resp = new AuthResponse("jwt-token", UUID.randomUUID(),
                 Role.PASSAGEIRO, "campinas", Instant.now().plusSeconds(3600));
@@ -84,7 +84,7 @@ class AuthControllerWebMvcTest {
         RegisterRequest req = new RegisterRequest(
                 // Token válido de propósito: o 400 aqui tem de vir da falta de veículo.
                 "m@example.com", "senha12345", "João", "token-verificado",
-                Role.MOTORISTA, "Campinas", null, null
+                Role.MOTORISTA, "Campinas", null, null, "2026-10"
         );
 
         mvc.perform(post("/auth/register")
@@ -99,7 +99,7 @@ class AuthControllerWebMvcTest {
         RegisterRequest req = new RegisterRequest(
                 // Token válido de propósito: o 400 aqui tem de vir da role ADMIN.
                 "hacker@example.com", "senha12345", "Invasor", "token-verificado",
-                Role.ADMIN, "Campinas", null, null
+                Role.ADMIN, "Campinas", null, null, "2026-10"
         );
 
         mvc.perform(post("/auth/register")
@@ -208,7 +208,7 @@ class AuthControllerWebMvcTest {
         when(socialAuthService.register(any())).thenReturn(resp);
 
         SocialRegisterRequest req = new SocialRegisterRequest(SocialProvider.GOOGLE, "id-token",
-                "token-verificado", Role.MOTORISTA, "Remanso", VehicleType.MOTO, "ABC1D23");
+                "token-verificado", Role.MOTORISTA, "Remanso", VehicleType.MOTO, "ABC1D23", "2026-10");
 
         mvc.perform(post("/auth/social/register")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -236,7 +236,7 @@ class AuthControllerWebMvcTest {
     @Test
     void socialRegisterAsAdminReturns400AndNeverReachesService() throws Exception {
         SocialRegisterRequest req = new SocialRegisterRequest(SocialProvider.GOOGLE, "id-token",
-                "token-verificado", Role.ADMIN, "Remanso", null, null);
+                "token-verificado", Role.ADMIN, "Remanso", null, null, "2026-10");
 
         mvc.perform(post("/auth/social/register")
                         .contentType(MediaType.APPLICATION_JSON)

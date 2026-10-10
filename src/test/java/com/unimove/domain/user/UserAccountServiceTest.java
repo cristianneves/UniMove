@@ -86,6 +86,13 @@ class UserAccountServiceTest {
     }
 
     @Test
+    @DisplayName("stateOf: DELETED → GONE (token de conta excluida nao autentica)")
+    void deletedIsGone() {
+        when(userRepository.findStatusById(userId)).thenReturn(Optional.of(UserStatus.DELETED));
+        assertThat(service.stateOf(userId)).isEqualTo(AccountState.GONE);
+    }
+
+    @Test
     @DisplayName("stateOf: usuario inexistente → GONE")
     void missingIsGone() {
         when(userRepository.findStatusById(userId)).thenReturn(Optional.empty());

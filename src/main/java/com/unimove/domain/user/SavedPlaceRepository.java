@@ -2,6 +2,7 @@ package com.unimove.domain.user;
 
 import com.unimove.domain.user.dto.SavedPlaceResponse;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -24,4 +25,8 @@ public interface SavedPlaceRepository extends JpaRepository<SavedPlace, UUID> {
             ORDER BY p.createdAt ASC
             """)
     List<SavedPlaceResponse> findAllByUser(@Param("userId") UUID userId);
+
+    @Modifying
+    @Query("DELETE FROM SavedPlace p WHERE p.userId = :userId")
+    int deleteAllByUser(@Param("userId") UUID userId);
 }
