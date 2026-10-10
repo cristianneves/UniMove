@@ -4,6 +4,7 @@ import com.unimove.shared.exception.ApiError;
 import com.unimove.shared.security.AccountStatusChecker;
 import com.unimove.shared.security.JwtAuthenticationFilter;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.DispatcherType;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -38,6 +39,10 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        // Despacho ASYNC/ERROR e continuacao de um request ja autorizado
+                        // (fim de stream SSE, pagina de erro). Reautorizar ali falha com
+                        // a resposta ja enviada quando o acesso foi revogado no meio.
+                        .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
                         .requestMatchers(
                                 "/auth/**",
                                 // Chamado pela Meta, nao por um usuario logado. A autenticacao
