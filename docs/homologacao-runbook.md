@@ -16,6 +16,8 @@ FROM flyway_schema_history ORDER BY installed_rank DESC LIMIT 5;
 
 Se a versão for menor que 19 e houver usuários reais, **não suba a API**. Faça backup e decida antes.
 
+**Trava automática (desde 10/10/2026):** a própria API recusa subir nesse cenário. O callback `DestructiveMigrationGuard` roda antes do Flyway e, se o banco estiver abaixo da V19 com usuário não-ADMIN, aborta o boot com `Banco abaixo da V19 com N usuario(s) nao-ADMIN`. Banco novo e banco já em V19+ passam direto. Para rodar a V19 de propósito, depois do backup testado, suba uma única vez com `UNIMOVE_ALLOW_DESTRUCTIVE_V19=true` e remova a variável em seguida. Validado contra Postgres 16: banco em V18 com 1 passageiro → boot abortado e usuário preservado; com a variável → migrou até a V35.
+
 ## 2. Pré-checagem das migrations novas (V23–V28)
 
 Todas são aditivas, exceto pelos dois pontos abaixo. Rode estas consultas no banco de produção **antes** do deploy:
@@ -93,9 +95,25 @@ O roteiro pode ser repetido com `docs/api.http` seguindo a mesma ordem.
 
 Postgres 16 limpo, V1–V32: senha temporária e revogação de sessão; CPF cifrado (`v1:`) com unicidade pelo hash; fila de documentos; auditoria da leitura de CPF/CNH; busca de usuários; preço travado (409); cancelamento em andamento (motorista e admin); filtros e detalhe de corridas; extrato por pagamento; histórico com endereço; troca de telefone; campanhas e caixa de entrada; **SSE encerrado na suspensão**; **retenção** (corrida de 6 anos anonimizada, recente intacta); exclusão limpando a caixa; rate limit com `X-Forwarded-For` forjado. Nenhum 500 no log.
 
+## 7.2 Smoke automatizado e observabilidade
+
+`scripts/smoke.sh <url>` é não destrutivo: health com retentativa (o plano free hiberna), readiness (com banco), versão e commit em `/actuator/info`, `/cities`, `/legal/terms`, desafio de telefone (expira sozinho) e 401 sem token. Com `SMOKE_EMAIL`/`SMOKE_PASSWORD` de uma conta de smoke, também login, `/users/me` e `/rides/history`. Sai com código 1 em qualquer falha e imprime data e HTTP de cada tentativa, que servem de evidência no card.
+
+Endpoints públicos de observabilidade:
+
+| Endpoint | Uso |
+|---|---|
+| `/actuator/health` | status geral (inclui banco), só `UP`/`DOWN`, sem detalhes |
+| `/actuator/health/liveness` | o processo está vivo (não olha o banco, para queda do banco não reiniciar o container) |
+| `/actuator/health/readiness` | pronto para tráfego (olha o banco). **Use este no monitor externo** |
+| `/actuator/info` | versão e commit do build (o CI passa `-Dbuild.commit=<sha>`) |
+
+Validado em 10/10/2026 contra Postgres 16 limpo: cold start → 2ª tentativa `200`, 11/11 PASS com conta de smoke; senha errada e host fora do ar → FAIL com código 1.
+
 ## 8. Pendente (infra, fora do código)
 
 - [ ] Health do Render com várias tentativas e logs. Um timeout isolado não prova indisponibilidade: o plano free hiberna.
-- [ ] Monitoramento e alerta (ex.: UptimeRobot em `/actuator/health`) e disponibilidade esperada.
+- [ ] Monitoramento e alerta (ex.: UptimeRobot em `/actuator/health/readiness`, intervalo de 5 min) e disponibilidade esperada.
+- [ ] Criar a conta de smoke em homologação e rodar `scripts/smoke.sh` contra o Render, anexando a saída ao card.
 - [ ] Testar o WhatsApp real em homologação (`PHONE_VERIFICATION_CHANNEL=WHATSAPP`).
 - [ ] Backup verificável agendado.

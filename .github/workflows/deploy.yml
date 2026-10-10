@@ -34,7 +34,7 @@ jobs:
       # A suite e toda unitaria / @WebMvcTest: nao precisa de Postgres nem
       # de Docker. Roda em ~1min.
       - name: mvn verify
-        run: mvn -B verify
+        run: mvn -B verify -Dbuild.commit=${{ github.sha }}
 
       # Reaproveitado pelo job de build: evita recompilar.
       - name: Preparar app.jar

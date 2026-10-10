@@ -57,7 +57,9 @@ public class SecurityConfig {
                                 // na tela de cadastro, antes de existir token.
                                 "/legal/**",
                                 // Swagger: cadeia propria com login de admin (DocsSecurityConfig).
-                                "/actuator/health"
+                                // Health (status + probes) e versao do build: lidos pelo
+                                // deploy, pelo monitor externo e pelo scripts/smoke.sh.
+                                "/actuator/health", "/actuator/health/**", "/actuator/info"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )

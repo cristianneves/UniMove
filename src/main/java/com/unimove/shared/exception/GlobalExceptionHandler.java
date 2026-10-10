@@ -15,6 +15,7 @@ import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.web.ErrorResponse;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -129,6 +130,13 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiError> handleUnexpected(Exception ex, HttpServletRequest req) {
+        // Excecoes padrao do Spring MVC (rota inexistente, metodo ou media type
+        // nao suportado...) ja trazem o status certo. Sem isso viravam 500.
+        if (ex instanceof ErrorResponse standard && standard.getStatusCode().is4xxClientError()) {
+            HttpStatus status = HttpStatus.valueOf(standard.getStatusCode().value());
+            String message = status == HttpStatus.NOT_FOUND ? "Recurso não encontrado" : standard.getBody().getDetail();
+            return build(status, message, req, null);
+        }
         log.error("Erro inesperado em {}", req.getRequestURI(), ex);
         return build(HttpStatus.INTERNAL_SERVER_ERROR, "Erro interno do servidor", req, null);
     }

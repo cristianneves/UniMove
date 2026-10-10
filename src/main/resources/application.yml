@@ -27,6 +27,24 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: false
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      # Publico, entao so o status. Liveness nao olha o banco (queda do banco
+      # nao deve reiniciar o container); readiness e o /health geral olham.
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,db
+  info:
+    build:
+      enabled: true
+
 server:
   # PORT e injetado pelo Render (e pela maioria dos PaaS) e tem precedencia:
   # sem isso o container escuta numa porta que o balanceador nao consulta e o
@@ -38,6 +56,10 @@ server:
     use-relative-redirects: true
 
 app:
+  flyway:
+    # A V19 apaga usuarios e corridas. Em banco abaixo dela com dados reais o
+    # boot para; so libere depois de backup testado (docs/homologacao-runbook.md).
+    allow-destructive-v19: ${UNIMOVE_ALLOW_DESTRUCTIVE_V19:false}
   jwt:
     # Em prod, JWT_SECRET vem do ambiente. Default aqui so para nao quebrar startup em dev local.
     secret: ${JWT_SECRET:dev-secret-NAO-USE-EM-PRODUCAO-troque-via-env-var}
