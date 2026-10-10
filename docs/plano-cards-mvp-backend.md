@@ -38,4 +38,18 @@ Decisões do dono do produto (10/10/2026): trava no boot para a V19; piloto **s�
 
 - [x] `mvn verify` + ITs contra Postgres real (473 + 23, 0 falhas)
 - [x] README atualizado, push da branch
-- [ ] Lista de cards para mover no Trello (token é só leitura)
+- [x] Lista de cards para mover no Trello (token é só leitura)
+
+## 5. Situação dos cards no Trello (mover/comentar à mão)
+
+A parte de backend está entregue em todos os 7. Nenhum vai para **Concluídas**, porque cada um ainda tem parte de app, de aparelho ou de operação (regra do guia: não concluir por auditoria estática).
+
+| Card | Sugestão | Comentário a colar |
+|---|---|---|
+| [RNF06][P0] Homologação | Em Andamento | backend ok (trava V19, probes, `scripts/smoke.sh`); faltam P4–P8 do `docs/go-no-go-piloto.md` |
+| [RF01][P0] Cadastro real | Preparada (app) | contrato provado por `AuthContractIT`; falta o Flutter |
+| [QA][P0] Contratos e matriz | Em Andamento | `docs/matriz-requisitos-mvp.md`; ITs rodando no CI; faltam os RNF de app |
+| [INTEGRAÇÃO][P0] E2E real | Preparada (QA) | jornada via API em `RideJourneyIT`; falta rodar em dois aparelhos |
+| [RF03/RF04][P0] Coordenadas demo | Preparada (app) | nada no backend |
+| [PASSAGEIRO][P0] Realtime/chat | Preparada (QA) | SSE/chat/avaliação provados por `RideJourneyIT`; falta aparelho e rede instável |
+| [RELEASE][P0] Go/No-Go | Em Andamento | `docs/go-no-go-piloto.md`: NO-GO até P1–P12 e assinaturas |
