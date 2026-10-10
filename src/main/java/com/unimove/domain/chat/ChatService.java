@@ -67,7 +67,7 @@ public class ChatService {
     @Transactional(readOnly = true)
     public SseEmitter subscribe(AuthenticatedUser user, UUID rideId, Long lastEventId) {
         rideService.assertChatAllowed(user, rideId);
-        SseEmitter emitter = hub.register(rideId);
+        SseEmitter emitter = hub.register(rideId, user.userId());
 
         // Replay sincrono na propria thread — o tamanho da janela e pequeno
         // (uma corrida raramente passa de algumas dezenas de msgs).

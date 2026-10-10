@@ -9,11 +9,13 @@ import com.unimove.domain.user.dto.AuthResponse;
 import com.unimove.domain.user.dto.UpdateProfileRequest;
 import com.unimove.domain.user.dto.UpdateProfileResponse;
 import com.unimove.domain.user.dto.UserProfileResponse;
+import com.unimove.shared.event.AccountAccessRevokedEvent;
 import com.unimove.shared.security.AuthenticatedUser;
 import com.unimove.shared.security.JwtService;
 import com.unimove.shared.util.CityNormalizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,6 +40,7 @@ public class UserProfileService {
     private final CityCatalog cityCatalog;
     private final AdminAuditLog auditLog;
     private final PhoneVerificationService phoneVerificationService;
+    private final ApplicationEventPublisher events;
     private final SecureRandom random = new SecureRandom();
 
     public UserProfileService(UserRepository userRepository,
@@ -46,7 +49,8 @@ public class UserProfileService {
                               JwtService jwtService,
                               CityCatalog cityCatalog,
                               AdminAuditLog auditLog,
-                              PhoneVerificationService phoneVerificationService) {
+                              PhoneVerificationService phoneVerificationService,
+                              ApplicationEventPublisher events) {
         this.userRepository = userRepository;
         this.driverRepository = driverRepository;
         this.passwordEncoder = passwordEncoder;
@@ -54,6 +58,7 @@ public class UserProfileService {
         this.cityCatalog = cityCatalog;
         this.auditLog = auditLog;
         this.phoneVerificationService = phoneVerificationService;
+        this.events = events;
     }
 
     /**
@@ -164,6 +169,7 @@ public class UserProfileService {
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         user.setMustChangePassword(false);
         user.setTokensValidAfter(Instant.now());
+        events.publishEvent(new AccountAccessRevokedEvent(user.getId()));
         log.info("Senha alterada pelo próprio usuário {} (sessões anteriores revogadas)", user.getId());
         return AuthResponse.of(user, jwtService.generate(user));
     }
@@ -185,6 +191,7 @@ public class UserProfileService {
         // Temporaria so serve para escolher outra; e quem tinha a senha antiga perde a sessao.
         user.setMustChangePassword(true);
         user.setTokensValidAfter(Instant.now());
+        events.publishEvent(new AccountAccessRevokedEvent(user.getId()));
         auditLog.record(adminId, AuditAction.USER_PASSWORD_RESET, "USER", targetUserId, null);
         log.warn("Senha do usuário {} resetada pelo admin {}", targetUserId, adminId);
         return new AdminResetPasswordResponse(user.getId(), user.getEmail(), temporaryPassword);

@@ -1069,12 +1069,12 @@ class RideServiceTest {
     void subscribeStatusRegistersForParticipant() {
         Ride ride = rideEnRoute(pax.userId(), mot.userId());
         when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
-        when(statusSseHub.register(ride.getId())).thenReturn(new SseEmitter());
+        when(statusSseHub.register(eq(ride.getId()), any())).thenReturn(new SseEmitter());
 
         SseEmitter emitter = rideService.subscribeStatus(pax, ride.getId());
 
         assertThat(emitter).isNotNull();
-        verify(statusSseHub).register(ride.getId());
+        verify(statusSseHub).register(eq(ride.getId()), any());
         verify(statusSseHub, never()).closeRide(any());
     }
 
@@ -1083,7 +1083,7 @@ class RideServiceTest {
     void subscribeStatusClosesWhenTerminal() {
         Ride ride = rideCompleted(pax.userId(), mot.userId());
         when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
-        when(statusSseHub.register(ride.getId())).thenReturn(new SseEmitter());
+        when(statusSseHub.register(eq(ride.getId()), any())).thenReturn(new SseEmitter());
 
         rideService.subscribeStatus(pax, ride.getId());
 
@@ -1098,7 +1098,7 @@ class RideServiceTest {
 
         assertThatThrownBy(() -> rideService.subscribeStatus(outroPax, ride.getId()))
                 .isInstanceOf(RideAccessDeniedException.class);
-        verify(statusSseHub, never()).register(any());
+        verify(statusSseHub, never()).register(any(), any());
     }
 
     // ------------------------------------------------------------------------

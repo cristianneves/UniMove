@@ -595,7 +595,7 @@ public class RideService {
                 .orElseThrow(RideNotFoundException::new);
         assertParticipant(user, ride);
 
-        SseEmitter emitter = statusSseHub.register(rideId);
+        SseEmitter emitter = statusSseHub.register(rideId, user.userId());
         RideStatusEvent snapshot = RideStatusEvent.from(ride);
         try {
             emitter.send(RideStatusSseHub.buildEvent(snapshot));
@@ -622,7 +622,7 @@ public class RideService {
                 driverService.getVehicleType(motorista.userId()));
         List<RideMuralItem> snapshot = rideRepository.findMural(motorista.cidade(), category);
 
-        SseEmitter emitter = muralSseHub.register(motorista.cidade(), category);
+        SseEmitter emitter = muralSseHub.register(motorista.cidade(), category, motorista.userId());
         try {
             emitter.send(MuralSseHub.snapshotEvent(snapshot));
         } catch (IOException e) {

@@ -5,10 +5,12 @@ import com.unimove.domain.audit.AuditAction;
 import com.unimove.domain.user.dto.AdminUserItem;
 import com.unimove.domain.user.dto.PassengerPublicInfo;
 import com.unimove.domain.user.dto.UserStatusResponse;
+import com.unimove.shared.event.AccountAccessRevokedEvent;
 import com.unimove.shared.security.AccountStatusChecker;
 import com.unimove.shared.util.CityNormalizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -26,10 +28,13 @@ public class UserAccountService implements UserDirectory, AccountStatusChecker {
 
     private final UserRepository userRepository;
     private final AdminAuditLog auditLog;
+    private final ApplicationEventPublisher events;
 
-    public UserAccountService(UserRepository userRepository, AdminAuditLog auditLog) {
+    public UserAccountService(UserRepository userRepository, AdminAuditLog auditLog,
+                              ApplicationEventPublisher events) {
         this.userRepository = userRepository;
         this.auditLog = auditLog;
+        this.events = events;
     }
 
     @Transactional(readOnly = true)
@@ -78,6 +83,7 @@ public class UserAccountService implements UserDirectory, AccountStatusChecker {
         user.setSuspendedReason(reason);
         user.setSuspendedByAdminId(adminId);
         auditLog.record(adminId, AuditAction.USER_SUSPENDED, "USER", targetUserId, reason);
+        events.publishEvent(new AccountAccessRevokedEvent(targetUserId));
         log.warn("Usuário {} suspenso pelo admin {} (motivo: {})", targetUserId, adminId, reason);
         return UserStatusResponse.from(user);
     }

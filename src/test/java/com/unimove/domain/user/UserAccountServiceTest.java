@@ -2,6 +2,7 @@ package com.unimove.domain.user;
 
 import com.unimove.domain.audit.AdminAuditLog;
 import com.unimove.domain.audit.AuditAction;
+import com.unimove.shared.event.AccountAccessRevokedEvent;
 import com.unimove.shared.security.AccountStatusChecker.AccountState;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -9,6 +10,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.time.Instant;
 import java.util.Optional;
@@ -26,6 +28,7 @@ class UserAccountServiceTest {
 
     @Mock UserRepository userRepository;
     @Mock AdminAuditLog auditLog;
+    @Mock ApplicationEventPublisher events;
     @InjectMocks UserAccountService service;
 
     private final UUID userId = UUID.randomUUID();
@@ -43,6 +46,7 @@ class UserAccountServiceTest {
 
         assertThat(user.getStatus()).isEqualTo(UserStatus.SUSPENDED);
         verify(auditLog).record(adminId, AuditAction.USER_SUSPENDED, "USER", userId, "fraude");
+        verify(events).publishEvent(new AccountAccessRevokedEvent(userId));
     }
 
     @Test

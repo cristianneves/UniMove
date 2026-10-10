@@ -15,6 +15,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import com.unimove.shared.event.AccountAccessRevokedEvent;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.time.Clock;
@@ -49,6 +51,7 @@ class AccountPrivacyServiceTest {
     @Mock RidePrivacyPort ridePrivacy;
     @Mock ChatPrivacyPort chatPrivacy;
     @Mock PasswordEncoder passwordEncoder;
+    @Mock ApplicationEventPublisher events;
 
     private AccountPrivacyService service;
     private User user;
@@ -58,7 +61,7 @@ class AccountPrivacyServiceTest {
     void setUp() {
         service = new AccountPrivacyService(userRepository, driverRepository, savedPlaceRepository,
                 socialIdentityRepository, documentService, profileService, ridePrivacy, chatPrivacy,
-                passwordEncoder, new PrivacyProperties(TERMS, "https://x/privacidade"),
+                passwordEncoder, new PrivacyProperties(TERMS, "https://x/privacidade"), events,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         user = new User();
         user.setId(UUID.randomUUID());
@@ -97,6 +100,7 @@ class AccountPrivacyServiceTest {
         verify(chatPrivacy).deleteSentBy(user.getId());
         verify(ridePrivacy).eraseRatingComments(user.getId());
         verify(documentService, never()).purgeFiles(any());
+        verify(events).publishEvent(new AccountAccessRevokedEvent(user.getId()));
     }
 
     @Test

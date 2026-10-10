@@ -2,6 +2,7 @@ package com.unimove.domain.ride;
 
 import com.unimove.domain.ride.dto.MuralRideRemovedEvent;
 import com.unimove.domain.ride.dto.RideMuralItem;
+import com.unimove.shared.web.UserStreamRegistry;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -27,6 +28,13 @@ import java.util.function.Supplier;
 @Component
 public class MuralSseHub {
 
+    /** Indice por usuario, para derrubar os streams de quem perde o acesso. */
+    private final UserStreamRegistry userStreams;
+
+    public MuralSseHub(UserStreamRegistry userStreams) {
+        this.userStreams = userStreams;
+    }
+
     // 30 min de conexao — cliente reconecta e recebe o snapshot atual.
     public static final long EMITTER_TIMEOUT_MS = 30 * 60 * 1000L;
 
@@ -40,12 +48,15 @@ public class MuralSseHub {
         return cidade + "|" + category;
     }
 
-    public SseEmitter register(String cidade, RideCategory category) {
+    public SseEmitter register(String cidade, RideCategory category, UUID userId) {
         String key = channelKey(cidade, category);
         SseEmitter emitter = new SseEmitter(EMITTER_TIMEOUT_MS);
         emittersByChannel.computeIfAbsent(key, k -> new CopyOnWriteArrayList<>()).add(emitter);
 
+        userStreams.track(userId, emitter);
+
         Runnable remove = () -> {
+            userStreams.untrack(userId, emitter);
             CopyOnWriteArrayList<SseEmitter> list = emittersByChannel.get(key);
             if (list != null) {
                 list.remove(emitter);

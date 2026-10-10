@@ -3,6 +3,7 @@ package com.unimove.domain.user;
 import com.unimove.domain.city.CityCatalog;
 import com.unimove.domain.city.CityNotServedException;
 import com.unimove.domain.verification.PhoneVerificationService;
+import com.unimove.shared.event.AccountAccessRevokedEvent;
 import com.unimove.domain.user.dto.AdminResetPasswordResponse;
 import com.unimove.domain.user.dto.UpdateProfileRequest;
 import com.unimove.domain.user.dto.UpdateProfileResponse;
@@ -16,6 +17,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.time.Instant;
@@ -46,6 +48,7 @@ class UserProfileServiceTest {
     @Mock JwtService jwtService;
     @Mock CityCatalog cityCatalog;
     @Mock PhoneVerificationService phoneVerificationService;
+    @Mock ApplicationEventPublisher events;
     @Mock com.unimove.domain.audit.AdminAuditLog auditLog;
 
     @InjectMocks UserProfileService service;
@@ -87,6 +90,7 @@ class UserProfileServiceTest {
         assertThat(user.isMustChangePassword()).isFalse();
         assertThat(resp.token()).isEqualTo("jwt-novo");
         assertThat(resp.mustChangePassword()).isFalse();
+        verify(events).publishEvent(new AccountAccessRevokedEvent(USER_ID));
     }
 
     @Test

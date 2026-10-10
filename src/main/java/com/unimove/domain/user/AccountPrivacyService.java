@@ -6,9 +6,11 @@ import com.unimove.domain.user.document.DriverDocumentService;
 import com.unimove.domain.user.dto.DataExportResponse;
 import com.unimove.domain.user.dto.PrivacyPreferencesResponse;
 import com.unimove.domain.user.social.SocialIdentityRepository;
+import com.unimove.shared.event.AccountAccessRevokedEvent;
 import com.unimove.shared.security.AuthenticatedUser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,6 +47,7 @@ public class AccountPrivacyService {
     private final ChatPrivacyPort chatPrivacy;
     private final PasswordEncoder passwordEncoder;
     private final PrivacyProperties privacy;
+    private final ApplicationEventPublisher events;
     private final Clock clock;
 
     public AccountPrivacyService(UserRepository userRepository,
@@ -57,6 +60,7 @@ public class AccountPrivacyService {
                                  ChatPrivacyPort chatPrivacy,
                                  PasswordEncoder passwordEncoder,
                                  PrivacyProperties privacy,
+                                 ApplicationEventPublisher events,
                                  Clock clock) {
         this.userRepository = userRepository;
         this.driverRepository = driverRepository;
@@ -68,6 +72,7 @@ public class AccountPrivacyService {
         this.chatPrivacy = chatPrivacy;
         this.passwordEncoder = passwordEncoder;
         this.privacy = privacy;
+        this.events = events;
         this.clock = clock;
     }
 
@@ -156,6 +161,7 @@ public class AccountPrivacyService {
         user.setMarketingOptInAt(null);
         user.setStatus(UserStatus.DELETED);
         user.setDeletedAt(now);
+        events.publishEvent(new AccountAccessRevokedEvent(id));
 
         int files = 0;
         if (user.getRole() == Role.MOTORISTA) {
