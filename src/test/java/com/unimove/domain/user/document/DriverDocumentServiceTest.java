@@ -10,6 +10,7 @@ import com.unimove.domain.user.document.dto.DocumentFileUrlResponse;
 import com.unimove.domain.user.document.dto.DriverDocumentItem;
 import com.unimove.domain.user.document.dto.DriverDocumentationResponse;
 import com.unimove.domain.user.document.dto.DriverProfileRequest;
+import com.unimove.shared.security.FieldCrypto;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -51,6 +52,7 @@ class DriverDocumentServiceTest {
     @Mock DriverDocumentRepository documentRepository;
     @Mock DocumentStorage storage;
     @Mock AdminAuditLog auditLog;
+    @Mock FieldCrypto crypto;
 
     private DriverDocumentService service;
     private Driver driver;
@@ -62,7 +64,7 @@ class DriverDocumentServiceTest {
     void setUp() {
         service = new DriverDocumentService(driverRepository, documentRepository, storage,
                 new DocumentStorageProperties("https://x.supabase.co", "key", "driver-documents", 300, 1024),
-                auditLog, Clock.fixed(NOW, ZoneOffset.UTC));
+                auditLog, crypto, Clock.fixed(NOW, ZoneOffset.UTC));
         driverId = UUID.randomUUID();
         driver = new Driver();
         driver.setId(driverId);
@@ -71,6 +73,7 @@ class DriverDocumentServiceTest {
         lenient().when(driverRepository.findById(driverId)).thenReturn(Optional.of(driver));
         lenient().when(documentRepository.findByDriverIdOrderByCreatedAtDesc(driverId)).thenReturn(history);
         lenient().when(documentRepository.save(any(DriverDocument.class))).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(crypto.fingerprint(anyString())).thenAnswer(inv -> "h:" + inv.getArgument(0));
     }
 
     // ------------------------------------------------------------------------
@@ -155,6 +158,8 @@ class DriverDocumentServiceTest {
         DriverDocumentationResponse resp = service.updateProfile(driverId, profile("B", TODAY.plusYears(2), "abc-1d23"));
 
         assertThat(driver.getCpf()).isEqualTo("52998224725");
+        assertThat(driver.getCpfHash()).isEqualTo("h:52998224725");
+        assertThat(driver.getCnhNumberHash()).isEqualTo("h:12345678901");
         assertThat(driver.getVehiclePlate()).isEqualTo("ABC1D23");
         assertThat(driver.hasCompleteProfile()).isTrue();
         assertThat(resp.profile().cnhCategory()).isEqualTo("B");
@@ -204,7 +209,7 @@ class DriverDocumentServiceTest {
     @Test
     @DisplayName("CPF ja usado por outro motorista → 409")
     void duplicateCpf() {
-        when(driverRepository.existsByCpfAndIdNot("52998224725", driverId)).thenReturn(true);
+        when(driverRepository.existsByCpfHashAndIdNot("h:52998224725", driverId)).thenReturn(true);
 
         assertThatThrownBy(() -> service.updateProfile(driverId, profile("B", TODAY.plusYears(1), "ABC1234")))
                 .isInstanceOf(DriverIdentityInUseException.class);
@@ -234,7 +239,7 @@ class DriverDocumentServiceTest {
         DriverDocumentItem item = service.upload(driverId, DriverDocumentType.CNH, file(DocumentFileInspectorTest.JPEG));
 
         ArgumentCaptor<String> path = ArgumentCaptor.forClass(String.class);
-        verify(storage).put(path.capture(), eq(DocumentFileInspectorTest.JPEG), eq("image/jpeg"));
+        verify(storage).put(path.capture(), any(), eq("image/jpeg"));
         assertThat(path.getValue()).startsWith(driverId + "/cnh/").endsWith(".jpg");
         assertThat(item.status()).isEqualTo(DriverDocumentStatus.SUBMITTED);
         assertThat(item.contentType()).isEqualTo("image/jpeg");

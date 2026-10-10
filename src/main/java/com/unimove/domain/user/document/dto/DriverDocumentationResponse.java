@@ -3,6 +3,7 @@ package com.unimove.domain.user.document.dto;
 import com.unimove.domain.user.Driver;
 import com.unimove.domain.user.VehicleType;
 import com.unimove.domain.user.document.DocumentationStatus;
+import com.unimove.shared.util.Cnh;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -26,6 +27,8 @@ public record DriverDocumentationResponse(
     public record Profile(
             String cpf,
             String cnhNumber,
+            /** Sinal para o admin: digito verificador da CNH confere? Nulo sem CNH informada. */
+            Boolean cnhCheckDigitValid,
             String cnhCategory,
             LocalDate cnhExpiresOn,
             VehicleType vehicleType,
@@ -36,7 +39,9 @@ public record DriverDocumentationResponse(
             String vehicleColor
     ) {
         public static Profile from(Driver d) {
-            return new Profile(d.getCpf(), d.getCnhNumber(), d.getCnhCategory(), d.getCnhExpiresOn(),
+            return new Profile(d.getCpf(), d.getCnhNumber(),
+                    d.getCnhNumber() == null ? null : Cnh.hasValidCheckDigits(d.getCnhNumber()),
+                    d.getCnhCategory(), d.getCnhExpiresOn(),
                     d.getVehicleType(), d.getVehiclePlate(), d.getVehicleBrand(), d.getVehicleModel(),
                     d.getVehicleYear(), d.getVehicleColor());
         }

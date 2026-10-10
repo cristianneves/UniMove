@@ -52,9 +52,9 @@ public interface DriverRepository extends JpaRepository<Driver, UUID> {
             """)
     long countPendingNotDeleted();
 
-    boolean existsByCpfAndIdNot(String cpf, UUID id);
+    boolean existsByCpfHashAndIdNot(String cpfHash, UUID id);
 
-    boolean existsByCnhNumberAndIdNot(String cnhNumber, UUID id);
+    boolean existsByCnhNumberHashAndIdNot(String cnhNumberHash, UUID id);
 
     long countByOnlineTrue();
 

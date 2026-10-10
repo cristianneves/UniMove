@@ -70,6 +70,10 @@ app:
       # Android com serverClientId devolve o client ID WEB, iOS devolve o client ID iOS.
       client-ids: ${GOOGLE_CLIENT_IDS:}
       jwk-set-uri: ${GOOGLE_JWK_SET_URI:https://www.googleapis.com/oauth2/v3/certs}
+  security:
+    # 32 bytes em base64 (openssl rand -base64 32). Cifra CPF/CNH no banco.
+    # Obrigatoria em prod (o boot falha sem ela); em dev cai numa chave fixa com aviso.
+    data-encryption-key: ${DATA_ENCRYPTION_KEY:}
   privacy:
     # Versao vigente dos termos + politica (GET /legal/terms). Trocar exige novo aceite no cadastro.
     terms-version: ${PRIVACY_TERMS_VERSION:2026-10}

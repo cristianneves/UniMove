@@ -180,7 +180,9 @@ public class AccountPrivacyService {
         d.setApproved(false);
         d.setOnline(false);
         d.setCpf(null);
+        d.setCpfHash(null);
         d.setCnhNumber(null);
+        d.setCnhNumberHash(null);
         d.setCnhCategory(null);
         d.setCnhExpiresOn(null);
         d.setVehicleBrand(null);

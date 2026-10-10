@@ -1,6 +1,8 @@
 package com.unimove.domain.user;
 
+import com.unimove.shared.security.EncryptedStringConverter;
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -56,11 +58,20 @@ public class Driver {
 
     // --- Cadastro documental (V27). Nulos ate o motorista preencher. ---
 
-    @Column(name = "cpf", length = 11)
+    /** Cifrado no banco (AES-GCM, V31); a unicidade vai por {@link #cpfHash}. */
+    @Convert(converter = EncryptedStringConverter.class)
+    @Column(name = "cpf", length = 255)
     private String cpf;
 
-    @Column(name = "cnh_number", length = 11)
+    @Column(name = "cpf_hash", length = 64)
+    private String cpfHash;
+
+    @Convert(converter = EncryptedStringConverter.class)
+    @Column(name = "cnh_number", length = 255)
     private String cnhNumber;
+
+    @Column(name = "cnh_number_hash", length = 64)
+    private String cnhNumberHash;
 
     @Column(name = "cnh_category", length = 2)
     private String cnhCategory;

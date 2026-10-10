@@ -11,6 +11,7 @@ import com.unimove.domain.user.document.dto.PendingDocumentItem;
 import com.unimove.domain.user.document.dto.DriverDocumentItem;
 import com.unimove.domain.user.document.dto.DriverDocumentationResponse;
 import com.unimove.domain.user.document.dto.DriverProfileRequest;
+import com.unimove.shared.security.FieldCrypto;
 import com.unimove.shared.util.Cpf;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,6 +62,7 @@ public class DriverDocumentService {
     private final DocumentStorage storage;
     private final DocumentStorageProperties storageProps;
     private final AdminAuditLog auditLog;
+    private final FieldCrypto crypto;
     private final Clock clock;
 
     public DriverDocumentService(DriverRepository driverRepository,
@@ -68,12 +70,14 @@ public class DriverDocumentService {
                                  DocumentStorage storage,
                                  DocumentStorageProperties storageProps,
                                  AdminAuditLog auditLog,
+                                 FieldCrypto crypto,
                                  Clock clock) {
         this.driverRepository = driverRepository;
         this.documentRepository = documentRepository;
         this.storage = storage;
         this.storageProps = storageProps;
         this.auditLog = auditLog;
+        this.crypto = crypto;
         this.clock = clock;
     }
 
@@ -140,8 +144,10 @@ public class DriverDocumentService {
         String cpf = Cpf.digits(req.cpf());
         String plate = req.vehiclePlate().replace("-", "").toUpperCase();
         validateProfile(driver.getVehicleType(), req, today);
-        if (driverRepository.existsByCpfAndIdNot(cpf, driverId)
-                || driverRepository.existsByCnhNumberAndIdNot(req.cnhNumber(), driverId)) {
+        String cpfHash = crypto.fingerprint(cpf);
+        String cnhHash = crypto.fingerprint(req.cnhNumber());
+        if (driverRepository.existsByCpfHashAndIdNot(cpfHash, driverId)
+                || driverRepository.existsByCnhNumberHashAndIdNot(cnhHash, driverId)) {
             throw new DriverIdentityInUseException();
         }
 
@@ -154,7 +160,9 @@ public class DriverDocumentService {
                 || !Objects.equals(driver.getVehicleYear(), req.vehicleYear().shortValue());
 
         driver.setCpf(cpf);
+        driver.setCpfHash(cpfHash);
         driver.setCnhNumber(req.cnhNumber());
+        driver.setCnhNumberHash(cnhHash);
         driver.setCnhCategory(req.cnhCategory());
         driver.setCnhExpiresOn(req.cnhExpiresOn());
         driver.setVehicleBrand(req.vehicleBrand().trim());
@@ -207,6 +215,8 @@ public class DriverDocumentService {
                     ? "Formato não suportado. Envie JPG, PNG ou PDF."
                     : "Formato não suportado. Envie uma foto JPG ou PNG.");
         }
+
+        content = DocumentFileInspector.sanitize(content, detected);
 
         UUID documentId = UUID.randomUUID();
         String path = driverId + "/" + type.name().toLowerCase() + "/" + documentId + "." + detected.extension();
