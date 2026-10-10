@@ -74,6 +74,12 @@ app:
     # 32 bytes em base64 (openssl rand -base64 32). Cifra CPF/CNH no banco.
     # Obrigatoria em prod (o boot falha sem ela); em dev cai numa chave fixa com aviso.
     data-encryption-key: ${DATA_ENCRYPTION_KEY:}
+  retention:
+    # Expurgo LGPD diario: corridas antigas perdem endereco/rota/posicao; arquivos de
+    # documento reprovados ou substituidos saem do storage. Ver docs/lgpd-inventario-dados.md.
+    enabled: ${RETENTION_ENABLED:true}
+    ride-years: ${RETENTION_RIDE_YEARS:5}
+    rejected-document-days: ${RETENTION_REJECTED_DOCUMENT_DAYS:90}
   privacy:
     # Versao vigente dos termos + politica (GET /legal/terms). Trocar exige novo aceite no cadastro.
     terms-version: ${PRIVACY_TERMS_VERSION:2026-10}

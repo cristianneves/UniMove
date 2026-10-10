@@ -467,6 +467,29 @@ class DriverDocumentServiceTest {
     }
 
     @Test
+    @DisplayName("retencao: apaga do storage os arquivos obsoletos e zera o caminho, mantendo o registro")
+    void purgeObsoleteFiles() {
+        DriverDocument rejected = doc(DriverDocumentType.CRLV, DriverDocumentStatus.REJECTED);
+        String path = rejected.getStoragePath();
+        when(documentRepository.findObsoleteWithFile(any(), any())).thenReturn(List.of(rejected));
+
+        assertThat(service.purgeObsoleteFiles(NOW)).isEqualTo(1);
+
+        verify(storage).delete(List.of(path));
+        assertThat(rejected.getStoragePath()).isNull();
+        assertThat(rejected.getStatus()).isEqualTo(DriverDocumentStatus.REJECTED);
+    }
+
+    @Test
+    @DisplayName("retencao sem obsoletos nao chama o storage")
+    void purgeObsoleteNothing() {
+        when(documentRepository.findObsoleteWithFile(any(), any())).thenReturn(List.of());
+
+        assertThat(service.purgeObsoleteFiles(NOW)).isZero();
+        verify(storage, never()).delete(any());
+    }
+
+    @Test
     @DisplayName("purgeFiles sem arquivos nao chama o storage")
     void purgeNothing() {
         when(documentRepository.findStoragePaths(driverId)).thenReturn(List.of());

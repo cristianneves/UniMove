@@ -7,6 +7,7 @@ import com.unimove.domain.ride.dto.RideMuralItem;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -159,6 +160,35 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
     Page<RideHistoryItem> findHistoryForDriver(@Param("userId") UUID userId,
                                                @Param("status") RideStatus status,
                                                Pageable pageable);
+
+    /** Retencao: paradas (enderecos intermediarios) das corridas antigas. */
+    @Modifying
+    @Query(value = "DELETE FROM ride_stops WHERE ride_id IN (SELECT id FROM rides WHERE created_at < :cutoff)",
+            nativeQuery = true)
+    int deleteStopsOfRidesCreatedBefore(@Param("cutoff") Instant cutoff);
+
+    /**
+     * Retencao: tira da corrida antiga o que localiza a pessoa. Coordenadas
+     * arredondadas a 2 casas (~1 km) mantem o agregado por regiao. Idempotente:
+     * so toca linha que ainda tem algo a apagar.
+     */
+    @Modifying
+    @Query(value = """
+            UPDATE rides SET
+                origem_endereco = NULL, destino_endereco = NULL, route_geometry = NULL,
+                lat_origem = ROUND(lat_origem, 2), lng_origem = ROUND(lng_origem, 2),
+                lat_destino = ROUND(lat_destino, 2), lng_destino = ROUND(lng_destino, 2),
+                driver_current_lat = NULL, driver_current_lng = NULL,
+                driver_location_updated_at = NULL, driver_location_accuracy_m = NULL,
+                cancel_reason = NULL, payment_note = NULL, pix_payload = NULL
+            WHERE created_at < :cutoff
+              AND (origem_endereco IS NOT NULL OR destino_endereco IS NOT NULL OR route_geometry IS NOT NULL
+                   OR cancel_reason IS NOT NULL OR payment_note IS NOT NULL OR pix_payload IS NOT NULL
+                   OR driver_current_lat IS NOT NULL
+                   OR lat_origem <> ROUND(lat_origem, 2) OR lng_origem <> ROUND(lng_origem, 2)
+                   OR lat_destino <> ROUND(lat_destino, 2) OR lng_destino <> ROUND(lng_destino, 2))
+            """, nativeQuery = true)
+    int anonymizeRidesCreatedBefore(@Param("cutoff") Instant cutoff);
 
     /** Exportacao LGPD: toda corrida em que o usuario participou, em qualquer papel. */
     @Query("""

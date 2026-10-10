@@ -4,6 +4,7 @@ import com.unimove.domain.chat.dto.ChatMessageResponse;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -28,5 +29,11 @@ class ChatPrivacyService implements ChatPrivacyPort {
     @Transactional
     public int deleteSentBy(UUID userId) {
         return repository.deleteBySenderId(userId);
+    }
+
+    @Override
+    @Transactional
+    public int deleteOlderThan(Instant cutoff) {
+        return repository.deleteCreatedBefore(cutoff);
     }
 }

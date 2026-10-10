@@ -16,6 +16,7 @@ import com.unimove.shared.util.Cpf;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -324,6 +325,21 @@ public class DriverDocumentService {
                 .forEach(d -> d.setStoragePath(null));
         log.info("Arquivos de documento do driver {} expurgados ({})", driverId, paths.size());
         return paths.size();
+    }
+
+    /**
+     * Retencao: apaga do storage, em lotes, os arquivos obsoletos (reprovados ou
+     * substituidos ha mais que o prazo) e zera o caminho. O registro fica.
+     */
+    @Transactional
+    public int purgeObsoleteFiles(Instant cutoff) {
+        List<DriverDocument> obsolete = documentRepository.findObsoleteWithFile(cutoff, PageRequest.of(0, 500));
+        if (obsolete.isEmpty()) {
+            return 0;
+        }
+        storage.delete(obsolete.stream().map(DriverDocument::getStoragePath).toList());
+        obsolete.forEach(d -> d.setStoragePath(null));
+        return obsolete.size();
     }
 
     // ------------------------------------------------------------------------
