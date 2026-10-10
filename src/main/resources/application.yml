@@ -56,6 +56,10 @@ server:
     use-relative-redirects: true
 
 app:
+  payment:
+    # Pix sem PSP e so simulado (nenhum dinheiro circula). Piloto e so dinheiro:
+    # desligado, confirm-payment PIX responde 409. Ligar quando houver PSP real.
+    pix-enabled: ${PAYMENT_PIX_ENABLED:false}
   flyway:
     # A V19 apaga usuarios e corridas. Em banco abaixo dela com dados reais o
     # boot para; so libere depois de backup testado (docs/homologacao-runbook.md).

@@ -166,22 +166,20 @@ class RideJourneyIT extends IntegrationTestSupport {
     }
 
     @Test
-    @DisplayName("Pix sem PSP fica SIMULATED com payload ficticio; dinheiro fica PENDING ate o motorista registrar")
-    void simulatedPixIsNeverConfirmedMoney() {
+    @DisplayName("piloto so dinheiro: Pix → 409 e a corrida segue pendente; dinheiro publica no mural como PENDING")
+    void pilotIsCashOnly() {
         String passenger = token(newUser(Role.PASSAGEIRO));
         String rideId = json(send(postJson("/rides", passenger, RIDE_BODY))).get("id").asText();
 
-        JsonNode pix = json(send(postJson("/rides/" + rideId + "/confirm-payment", passenger, "{\"method\":\"PIX\"}")));
-        assertThat(pix.get("paymentStatus").asText()).isEqualTo("SIMULATED");
-        assertThat(pix.get("pixPayload").asText()).endsWith("SIMU");
-        assertThat(pix.get("paymentConfirmedAt").isNull()).isTrue();
+        HttpResponse<String> pix = send(postJson("/rides/" + rideId + "/confirm-payment", passenger, "{\"method\":\"PIX\"}"));
+        assertThat(pix.statusCode()).isEqualTo(409);
+        assertThat(json(pix).get("message").asText()).contains("dinheiro");
+        assertThat(json(get("/rides/" + rideId, passenger)).get("status").asText()).isEqualTo("PENDING_PAYMENT");
 
-        String driver = token(newOperationalDriver());
-        send(postJson("/rides/" + rideId + "/accept", driver, POSITION));
-        send(postJson("/rides/" + rideId + "/start", driver, "{}"));
-        send(postJson("/rides/" + rideId + "/complete", driver, "{}"));
-        assertThat(send(postJson("/rides/" + rideId + "/cash-payment", driver, "{\"receivedAmount\":10}")).statusCode())
-                .as("registro de dinheiro em corrida Pix").isBetween(400, 499);
-        assertThat(json(get("/rides/" + rideId, passenger)).get("paymentStatus").asText()).isEqualTo("SIMULATED");
+        JsonNode cash = json(send(postJson("/rides/" + rideId + "/confirm-payment", passenger,
+                "{\"method\":\"DINHEIRO\",\"changeFor\":100}")));
+        assertThat(cash.get("status").asText()).isEqualTo("AVAILABLE_IN_MURAL");
+        assertThat(cash.get("paymentStatus").asText()).isEqualTo("PENDING");
+        assertThat(cash.get("pixPayload").isNull()).isTrue();
     }
 }

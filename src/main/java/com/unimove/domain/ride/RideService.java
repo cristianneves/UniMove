@@ -266,6 +266,9 @@ public class RideService {
 
         RideStateMachine.assertCanTransition(ride.getStatus(), RideStatus.AVAILABLE_IN_MURAL);
 
+        if (req.method() == PaymentMethod.PIX && !paymentService.isPixEnabled()) {
+            throw new PaymentMethodUnavailableException();
+        }
         if (req.changeFor() != null) {
             if (req.method() != PaymentMethod.DINHEIRO) {
                 throw new InvalidCashPaymentException("Troco só se aplica a pagamento em dinheiro.");

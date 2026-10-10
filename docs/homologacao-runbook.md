@@ -67,6 +67,8 @@ CPF e número da CNH ficam cifrados (AES-256-GCM). Antes do deploy:
 | `PRIVACY_TERMS_VERSION`, `PRIVACY_POLICY_URL` | versão e link da política exigidos no cadastro |
 | `DATA_ENCRYPTION_KEY` | **obrigatória em prod**: cifra CPF/CNH |
 | `RATE_LIMIT_*`, `DRIVER_LOCATION_*`, `RETENTION_*` | opcionais; os defaults servem para o piloto |
+| `PAYMENT_PIX_ENABLED` | padrão `false`: piloto **só dinheiro**, `confirm-payment` com Pix responde 409. Só ligue com PSP real integrado (Pix simulado não cobra nada) |
+| `UNIMOVE_ALLOW_DESTRUCTIVE_V19` | padrão `false`. Libera a V19 em banco com dados (ver §1). Nunca deixe ligada |
 
 ## 6. Segurança operacional
 

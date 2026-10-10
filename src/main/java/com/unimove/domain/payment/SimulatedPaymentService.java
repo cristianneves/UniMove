@@ -2,6 +2,7 @@ package com.unimove.domain.payment;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -15,6 +16,17 @@ class SimulatedPaymentService implements PaymentService {
     private static final String MERCHANT_NAME = "UNIMOVE";
     private static final String MERCHANT_CITY = "SAO PAULO";
     private static final String PIX_KEY = "unimove@example.com";
+
+    private final boolean pixEnabled;
+
+    SimulatedPaymentService(@Value("${app.payment.pix-enabled:false}") boolean pixEnabled) {
+        this.pixEnabled = pixEnabled;
+    }
+
+    @Override
+    public boolean isPixEnabled() {
+        return pixEnabled;
+    }
 
     @Override
     public String generatePixPayload(UUID rideId, BigDecimal valor) {
