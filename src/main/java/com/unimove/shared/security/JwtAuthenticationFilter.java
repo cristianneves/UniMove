@@ -22,10 +22,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private static final Logger log = LoggerFactory.getLogger(JwtAuthenticationFilter.class);
     private static final String BEARER_PREFIX = "Bearer ";
 
-    private final JwtService jwtService;
+    /** Motivo pelo qual um JWT valido nao autenticou; lido pelo entry point do SecurityConfig. */
+    public static final String BLOCKED_ACCOUNT_ATTRIBUTE = "unimove.blockedAccount";
 
-    public JwtAuthenticationFilter(JwtService jwtService) {
+    private final JwtService jwtService;
+    private final AccountStatusChecker accountStatusChecker;
+
+    public JwtAuthenticationFilter(JwtService jwtService, AccountStatusChecker accountStatusChecker) {
         this.jwtService = jwtService;
+        this.accountStatusChecker = accountStatusChecker;
     }
 
     @Override
@@ -40,19 +45,35 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         String token = header.substring(BEARER_PREFIX.length()).trim();
+        AuthenticatedUser principal;
         try {
-            AuthenticatedUser principal = jwtService.parse(token);
-            var auth = new UsernamePasswordAuthenticationToken(
-                    principal,
-                    null,
-                    List.of(new SimpleGrantedAuthority("ROLE_" + principal.role().name()))
-            );
-            SecurityContextHolder.getContext().setAuthentication(auth);
+            principal = jwtService.parse(token);
         } catch (JwtException | IllegalArgumentException ex) {
             log.debug("JWT inválido: {}", ex.getMessage());
             SecurityContextHolder.clearContext();
+            chain.doFilter(request, response);
+            return;
         }
 
+        // Uma consulta por PK por request: o preco de revogar na hora o acesso
+        // de quem foi suspenso ou excluiu a conta, sem blacklist de tokens.
+        // A conta bloqueada so deixa de autenticar: rota publica segue
+        // funcionando (ex.: recadastro com token velho no app) e a protegida
+        // cai no entry point, que le o motivo deste atributo.
+        AccountStatusChecker.AccountState state = accountStatusChecker.stateOf(principal.userId());
+        if (state != AccountStatusChecker.AccountState.ACTIVE) {
+            request.setAttribute(BLOCKED_ACCOUNT_ATTRIBUTE, state);
+            SecurityContextHolder.clearContext();
+            chain.doFilter(request, response);
+            return;
+        }
+
+        var auth = new UsernamePasswordAuthenticationToken(
+                principal,
+                null,
+                List.of(new SimpleGrantedAuthority("ROLE_" + principal.role().name()))
+        );
+        SecurityContextHolder.getContext().setAuthentication(auth);
         chain.doFilter(request, response);
     }
 }

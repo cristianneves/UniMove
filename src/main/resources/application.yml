@@ -39,6 +39,15 @@ app:
       max-attempts: ${LOGIN_LOCKOUT_MAX_ATTEMPTS:5}
       lockout-minutes: ${LOGIN_LOCKOUT_MINUTES:15}
       cleanup-interval-ms: ${LOGIN_LOCKOUT_CLEANUP_INTERVAL_MS:600000}
+  rate-limit:
+    # Teto por janela fixa (em memoria). auth = login/cadastro/social por IP;
+    # maps = geocode/reverse por usuario. 429 + Retry-After quando estoura.
+    auth:
+      max-requests: ${RATE_LIMIT_AUTH_MAX:30}
+      window-minutes: ${RATE_LIMIT_AUTH_WINDOW_MINUTES:10}
+    maps:
+      max-requests: ${RATE_LIMIT_MAPS_MAX:60}
+      window-minutes: ${RATE_LIMIT_MAPS_WINDOW_MINUTES:1}
   phone-verification:
     # LOG = dev/testes (link e codigo saem no log, webhook aceita POST manual).
     # WHATSAPP = producao; exige app.whatsapp.* preenchido ou o startup falha.

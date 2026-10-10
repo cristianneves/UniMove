@@ -2,6 +2,7 @@ package com.unimove.domain.user;
 
 import com.unimove.domain.user.dto.PassengerPublicInfo;
 import com.unimove.domain.user.dto.UserStatusResponse;
+import com.unimove.shared.security.AccountStatusChecker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -14,7 +15,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 @Service
-public class UserAccountService implements UserDirectory {
+public class UserAccountService implements UserDirectory, AccountStatusChecker {
 
     private static final Logger log = LoggerFactory.getLogger(UserAccountService.class);
 
@@ -37,6 +38,17 @@ public class UserAccountService implements UserDirectory {
         if (status != UserStatus.ACTIVE) {
             throw new UserSuspendedException();
         }
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public AccountState stateOf(UUID userId) {
+        return userRepository.findStatusById(userId)
+                .map(status -> switch (status) {
+                    case ACTIVE -> AccountState.ACTIVE;
+                    case SUSPENDED -> AccountState.SUSPENDED;
+                })
+                .orElse(AccountState.GONE);
     }
 
     @Transactional
