@@ -63,7 +63,10 @@ Monolito modular por dominio (detalhes em `CLAUDE.md`):
 ```
 com.unimove
 ├── domain.user       Auth, JWT, driver online/offline, admin, favoritos,         [implementado]
-│                     ratings, suspensao de usuario
+│                     ratings, suspensao de usuario, privacidade (LGPD)
+│   └── document      Cadastro documental do motorista (CPF/CNH/veiculo +        [implementado]
+│                     CNH/CRLV/selfie em bucket privado do Supabase Storage)
+├── domain.audit      Trilha de auditoria das acoes administrativas              [implementado]
 ├── domain.maps       Gateway OSRM (rotas + geometria/polyline) + cache de rotas,  [implementado]
 │                     gateway Photon (geocoding: busca de endereço + pin no mapa)
 ├── domain.ride       Mural, maquina de estados, tarifa dinamica (pricing_configs), [implementado]
@@ -73,7 +76,8 @@ com.unimove
 ├── domain.city       Cidades atendidas (whitelist) — porta CityCatalog,           [implementado]
 │                     `GET /cities` publico + admin de abertura/fechamento
 ├── domain.chat       Chat in-app via SSE entre passageiro e motorista             [implementado]
-├── domain.payment    Simulacao Pix + Dinheiro (BR Code ficticio)                  [implementado]
+├── domain.payment    Pix simulado (BR Code ficticio); dinheiro com registro      [implementado]
+│                     operacional e conciliacao vive em domain.ride
 └── shared            Config, security, exception handler, utils                   [implementado]
 ```
 
@@ -93,6 +97,9 @@ com.unimove
 - **Surge pricing:** [`docs/plano-surge-pricing.md`](./docs/plano-surge-pricing.md) — spec do preço dinâmico por demanda.
 - **Análise/roadmap:** [`docs/analise-mvp.md`](./docs/analise-mvp.md) — lacunas priorizadas para o piloto real.
 - **Deploy:** [`docs/deploy.md`](./docs/deploy.md) — Render + Supabase, secrets do GitHub, rollback e limites do plano gratuito.
+- **Homologação / runbook:** [`docs/homologacao-runbook.md`](./docs/homologacao-runbook.md) — checagens antes de aplicar V23–V28, bucket de documentos, smoke autenticado, backup e rollback.
+- **LGPD — inventário de dados:** [`docs/lgpd-inventario-dados.md`](./docs/lgpd-inventario-dados.md) — o que coletamos, por quê, com quem compartilhamos, retenção e como atender o titular.
+- **Contrato das novidades para o app:** [`docs/contrato-mvp-backend-gaps.md`](./docs/contrato-mvp-backend-gaps.md) — endpoints e campos novos/alterados desta versão (cadastro com `termsVersion`, documentos, dinheiro, GPS, privacidade).
 
 ---
 
@@ -115,6 +122,14 @@ com.unimove
 | `GOOGLE_LOGIN_ENABLED` | `false`                           | nao — `true` liga `/auth/social` |
 | `GOOGLE_CLIENT_IDS`   | —                                  | so com `GOOGLE_LOGIN_ENABLED=true` |
 | `GOOGLE_JWK_SET_URI`  | JWKS do Google                     | nao         |
+| `SUPABASE_URL`        | —                                  | nao — sem ele o upload de documentos do motorista responde 503 |
+| `SUPABASE_SERVICE_KEY` | —                                 | junto com `SUPABASE_URL` (chave **service_role**, so no backend) |
+| `SUPABASE_DOCUMENTS_BUCKET` | `driver-documents`           | nao — bucket **privado** |
+| `PRIVACY_TERMS_VERSION` | `2026-10`                        | nao — versao vigente dos termos; trocar exige novo aceite |
+| `PRIVACY_POLICY_URL`  | `https://unimove.app/privacidade`  | nao — link exibido no cadastro |
+| `RATE_LIMIT_AUTH_MAX` / `RATE_LIMIT_AUTH_WINDOW_MINUTES` | `30` / `10` | nao — login/cadastro/social por IP |
+| `RATE_LIMIT_MAPS_MAX` / `RATE_LIMIT_MAPS_WINDOW_MINUTES` | `60` / `1`  | nao — `/maps/*` por usuario |
+| `DRIVER_LOCATION_MAX_AGE_SECONDS` / `_MAX_ACCURACY_M` / `_MAX_SPEED_KMH` | `120` / `100` / `180` | nao — sanidade do GPS |
 | `PORT`                | —                                  | nao — injetado pelo Render; tem precedencia sobre `SERVER_PORT` |
 | `DOMAIN`              | —                                  | so no `docker-compose.prod.yml` (self-host) — dominio que o Caddy usa no TLS |
 | `IMAGE_TAG`           | `latest`                           | so no `docker-compose.prod.yml` (self-host) |
@@ -138,7 +153,7 @@ Veja `.env.example` para o template completo.
 Push na `main` dispara o pipeline em [`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml):
 
 ```
-[test]   mvn -B verify (196 testes, ~1min, sem Docker/Postgres)
+[test]   mvn -B verify (368 testes, ~1min, sem Docker/Postgres)
 [build]  buildx --platform linux/amd64 -> ghcr.io/cristianneves/unimove:<sha> + :latest
 [deploy] deploy hook do Render com imgURL=<sha>, depois espera /actuator/health
 ```
@@ -181,7 +196,8 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 | Bloco                       | Status        | Observacoes |
 |-----------------------------|---------------|-------------|
 | Scaffold (pom, profiles)    | concluido     | Spring Boot 3.3.5 + Java 21 |
-| Schema (`V1`-`V22`)         | concluido     | served_cities, users (com `status`, `phone_verified_at`, telefone unico e `password_hash` nullable p/ conta social), social_identities, phone_verifications, drivers, rides (com `@Version`, `share_token`, `route_geometry` e `surge_multiplier`), route_cache (com `geometry`), ride_ratings, saved_places, cancellation_fee, category, pricing_configs (com `surge_enabled`/`surge_cap`), chat_messages, ride_stops, geocode_cache |
+| Schema (`V1`-`V28`)         | concluido     | V23–V28: corrida ativa unica no banco, precisao do GPS, pagamento em dinheiro, auditoria admin, documentos do motorista, consentimento/exclusao (LGPD). |
+| Schema ate `V22`            | concluido     | served_cities, users (com `status`, `phone_verified_at`, telefone unico e `password_hash` nullable p/ conta social), social_identities, phone_verifications, drivers, rides (com `@Version`, `share_token`, `route_geometry` e `surge_multiplier`), route_cache (com `geometry`), ride_ratings, saved_places, cancellation_fee, category, pricing_configs (com `surge_enabled`/`surge_cap`), chat_messages, ride_stops, geocode_cache |
 | `shared` (security, JWT, exception handler) | concluido | `GlobalExceptionHandler` cobre validacao, JSON ilegivel/enum invalido (400), lock otimista, `BusinessException` |
 | `domain.user`               | concluido     | `/auth/*`, online/offline, admin approve, `/saved-places`, denormalizacao de rating, **suspensao/reativacao via `/admin/users/*`** |
 | Auto-cadastro sem escalacao | concluido     | `POST /auth/register` aceita apenas `PASSAGEIRO` ou `MOTORISTA` — `ADMIN` no body devolve 400 (`@AssertTrue` no `RegisterRequest`) e a guarda em `AuthService.register` devolve 403. Admin so existe via seed/migration (`V2__seed_admin.sql`) |
@@ -198,7 +214,14 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 | Painel de metricas (admin)  | concluido     | `GET /admin/metrics?from=&to=` — corridas, receita e usuarios + serie diaria; periodo por `created_at`, default 30 dias |
 | Taxa de cancelamento        | concluido     | `CancellationPolicy` — R$ 3,00 após 120s de `DRIVER_EN_ROUTE` (passageiro) |
 | Categorias MOTO/CARRO       | concluido     | Matching server-side no mural + accept, coeficientes por categoria |
-| Suspensao de usuario        | concluido     | `POST /admin/users/{id}/suspend|reactivate`; enforcement assimetrico (login + acoes de escrita) |
+| Suspensao de usuario        | concluido     | `POST /admin/users/{id}/suspend|reactivate`; **o filtro JWT consulta o status a cada request**: token de conta suspensa responde 403 na hora (excluida, 401); rota publica segue funcionando |
+| Rate limit                  | concluido     | Login/cadastro/social por IP e `/maps/*` por usuario (429 + `Retry-After`), alem do lockout por e-mail e do teto do desafio do WhatsApp |
+| Corrida ativa unica         | concluido     | Indices unicos parciais (V23) fecham a janela do clique duplo — passageiro e motorista; violacao vira o mesmo 409 |
+| Sanidade do GPS             | concluido     | `PUT /rides/{id}/driver-location` aceita `recordedAt`/`accuracyM`; 422 para posicao velha, do futuro, imprecisa ou salto impossivel; fora de ordem e ignorada; posicao apagada ao encerrar a corrida |
+| Pagamento em dinheiro       | concluido     | `changeFor` (troco) no `confirm-payment`; `POST /rides/{id}/cash-payment` (motorista registra o recebido; abaixo do preco = `DIVERGENT` com observacao); `paymentStatus` em corrida/historico/mural/admin; filtro `/admin/rides?paymentStatus=`; bloco `payments` em `/admin/metrics`. Pix segue `SIMULATED` — nunca conta como recebido |
+| Cadastro documental (RF02)  | concluido     | `/drivers/me/documentation/*` (CPF/CNH/veiculo + upload CNH/CRLV/selfie) e `/admin/drivers/{id}/documentation|documents/*` (URL assinada auditada, aprovar, reprovar com motivo). `approve` exige documentacao aprovada; online/aceite exige CNH valida. Ver `docs/homologacao-runbook.md` para o bucket |
+| Auditoria admin             | concluido     | `admin_audit_log` (V26) gravado na mesma transacao da acao; `GET /admin/audit?action=&targetId=` |
+| Privacidade (LGPD)          | concluido     | `GET /legal/terms`, `termsVersion` obrigatorio no cadastro, `POST /users/me/terms`, `GET/PUT /users/me/preferences` (opt-in promocional), `GET /users/me/data-export`, `DELETE /users/me` (anonimizacao imediata). Ver `docs/lgpd-inventario-dados.md` |
 | Share publico da viagem     | concluido     | `share_token` em toda ride; `GET /share/{token}` publico, 410 ao terminar |
 | Cidades atendidas (whitelist) | concluido   | `served_cities` + `CityCatalog`. `cidade` deixou de ser texto livre: cadastro (comum e social) e `PUT /users/me` so aceitam cidade da lista (400 `"Ainda nao atendemos esta cidade."`). `GET /cities` publico alimenta o seletor do app; ADMIN abre/fecha em runtime por `POST`/`DELETE /admin/cities`, sem deploy. Desativar e **soft**: quem ja opera na cidade continua, ela so some das escolhas novas. Motorista que troca de cidade e derrubado para offline |
 | Tarifa configuravel         | concluido     | `pricing_configs(cidade, category, base, per_km, per_min)` + cache em memoria; ADMIN edita via `PUT /admin/pricing`. **Independente da whitelist**: da pra configurar a tarifa antes de abrir a cidade |
@@ -214,7 +237,16 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 
 ### Testes
 
-Cobertura atual (`mvn test`) — 23 classes, **216 testes**:
+Cobertura atual (`mvn test`) — 38 classes, **368 testes**. Novas nesta versao:
+
+- `SecurityWebMvcTest` — cadeia de seguranca real: 401 sem/token adulterado, 403 por role, conta suspensa (403) e excluida (401) com token ainda valido, rota publica com token bloqueado, acesso cruzado (BOLA)
+- `RateLimitFilterTest`, `UserAccountServiceTest`, `DriverServiceTest`, `AdminAuditServiceTest`
+- `DriverLocationPolicyTest` — GPS velho/futuro/impreciso/salto impossivel/fora de ordem
+- `DriverDocumentServiceTest`, `SupabaseDocumentStorageTest`, `DocumentFileInspectorTest`, `DriverDocumentControllerWebMvcTest`, `CpfTest`
+- `AccountPrivacyServiceTest`, `RidePrivacyServiceTest`, `UserPrivacyControllerWebMvcTest`
+- `RideControllerContractTest` — contrato HTTP de todos os endpoints de corrida (status, validacao, shape do JSON)
+
+Ja existentes:
 
 - `CityCatalogServiceTest` — guarda de cidade atendida (inexistente e desativada dao o mesmo erro), `open` normalizando o slug e reativando linha existente em vez de duplicar, nome que nao vira slug → 400, soft delete e 404 em slug desconhecido
 - `CityControllerWebMvcTest` (MockMvc) — `GET /cities`, `POST /admin/cities` 201 (nova) vs 200 (reativada), nome em branco → 400, `DELETE` → 204 e 404
@@ -237,6 +269,6 @@ Cobertura atual (`mvn test`) — 23 classes, **216 testes**:
 - `UserProfileServiceTest` — edição de perfil, troca de senha, re-emissão de JWT ao mudar cidade, cidade fora da whitelist não altera nada, motorista derrubado para offline ao trocar de cidade (e mantido online quando só o nome muda), conta só-social sem senha (409 explicativo) e reset pelo admin que a converte em dual
 - `AdminMetricsServiceTest` (Mockito) — painel admin: derivação de `active`/taxas/ticket médio, defaulting do período (últimos 30 dias), range invertido → 400, agregado nulo → zeros
 
-Total: **216 testes** passando em segundos (JUnit 5 + Mockito, sem Docker/Postgres).
+Total: **368 testes** passando em segundos (JUnit 5 + Mockito, sem Docker/Postgres). As migrations V1–V28, o `ddl-auto=validate` e as queries JPQL foram validados subindo a API num Postgres 16 real, com smoke E2E ponta a ponta (ver `docs/homologacao-runbook.md`).
 
 > **Lock otimista:** não é exercitado em unit test (depende do `@Version` do Hibernate em runtime). A garantia vem do schema (`rides.version`) + tradução de `ObjectOptimisticLockingFailureException` para HTTP 409 no `GlobalExceptionHandler`. Valide manualmente via `docs/smoke-test.md` seção 5 (aceite por dois motoristas).
