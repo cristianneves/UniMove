@@ -8,6 +8,7 @@ import com.unimove.domain.maps.RouteInfo;
 import com.unimove.domain.payment.PaymentService;
 import com.unimove.domain.ride.dto.AcceptRideRequest;
 import com.unimove.domain.ride.dto.CancelRideRequest;
+import com.unimove.domain.ride.dto.CashPaymentRequest;
 import com.unimove.domain.ride.dto.CategoryOption;
 import com.unimove.domain.ride.dto.ConfirmPaymentRequest;
 import com.unimove.domain.ride.dto.CreateRideRequest;
@@ -997,6 +998,157 @@ class RideServiceTest {
         assertThatThrownBy(() -> rideService.subscribeStatus(outroPax, ride.getId()))
                 .isInstanceOf(RideAccessDeniedException.class);
         verify(statusSseHub, never()).register(any());
+    }
+
+    // ------------------------------------------------------------------------
+    // Pagamento em dinheiro (RF09)
+    // ------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("confirm-payment DINHEIRO com troco valido → PENDING e changeFor gravado")
+    void confirmCashWithChange() {
+        Ride ride = ridePending(pax.userId());
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        RideResponse resp = rideService.confirmPayment(pax, ride.getId(),
+                new ConfirmPaymentRequest(PaymentMethod.DINHEIRO, new BigDecimal("50.00")));
+
+        assertThat(resp.paymentStatus()).isEqualTo(PaymentStatus.PENDING);
+        assertThat(resp.cashChangeFor()).isEqualByComparingTo("50.00");
+        assertThat(resp.pixPayload()).isNull();
+    }
+
+    @Test
+    @DisplayName("confirm-payment PIX → SIMULATED (nunca pago)")
+    void confirmPixIsSimulated() {
+        Ride ride = ridePending(pax.userId());
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+        when(paymentService.generatePixPayload(any(), any())).thenReturn("payload");
+
+        RideResponse resp = rideService.confirmPayment(pax, ride.getId(), new ConfirmPaymentRequest(PaymentMethod.PIX));
+
+        assertThat(resp.paymentStatus()).isEqualTo(PaymentStatus.SIMULATED);
+    }
+
+    @Test
+    @DisplayName("confirm-payment: troco menor que o preco → 400, corrida continua pendente")
+    void changeBelowPriceRejected() {
+        Ride ride = ridePending(pax.userId());
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        assertThatThrownBy(() -> rideService.confirmPayment(pax, ride.getId(),
+                new ConfirmPaymentRequest(PaymentMethod.DINHEIRO, new BigDecimal("1.00"))))
+                .isInstanceOf(InvalidCashPaymentException.class);
+        assertThat(ride.getStatus()).isEqualTo(RideStatus.PENDING_PAYMENT);
+    }
+
+    @Test
+    @DisplayName("confirm-payment: troco com PIX → 400")
+    void changeWithPixRejected() {
+        Ride ride = ridePending(pax.userId());
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        assertThatThrownBy(() -> rideService.confirmPayment(pax, ride.getId(),
+                new ConfirmPaymentRequest(PaymentMethod.PIX, new BigDecimal("50.00"))))
+                .isInstanceOf(InvalidCashPaymentException.class);
+    }
+
+    @Test
+    @DisplayName("cash-payment: recebeu o valor → CONFIRMED com valor e horario")
+    void cashPaymentConfirmed() {
+        Ride ride = completedCashRide();
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        RideResponse resp = rideService.confirmCashPayment(mot, ride.getId(),
+                new CashPaymentRequest(ride.getPreco(), null));
+
+        assertThat(resp.paymentStatus()).isEqualTo(PaymentStatus.CONFIRMED);
+        assertThat(resp.cashReceivedAmount()).isEqualByComparingTo(ride.getPreco());
+        assertThat(resp.paymentConfirmedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("cash-payment: recebeu menos e explicou → DIVERGENT")
+    void cashPaymentDivergentWithNote() {
+        Ride ride = completedCashRide();
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        RideResponse resp = rideService.confirmCashPayment(mot, ride.getId(),
+                new CashPaymentRequest(BigDecimal.ZERO, "  Passageiro saiu sem pagar  "));
+
+        assertThat(resp.paymentStatus()).isEqualTo(PaymentStatus.DIVERGENT);
+        assertThat(resp.paymentNote()).isEqualTo("Passageiro saiu sem pagar");
+    }
+
+    @Test
+    @DisplayName("cash-payment: recebeu menos sem explicar → 400, nada gravado")
+    void cashPaymentDivergentRequiresNote() {
+        Ride ride = completedCashRide();
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        assertThatThrownBy(() -> rideService.confirmCashPayment(mot, ride.getId(),
+                new CashPaymentRequest(new BigDecimal("1.00"), " ")))
+                .isInstanceOf(InvalidCashPaymentException.class);
+        assertThat(ride.getPaymentStatus()).isEqualTo(PaymentStatus.PENDING);
+    }
+
+    @Test
+    @DisplayName("cash-payment: corrida ainda em andamento → 409")
+    void cashPaymentBeforeCompletion() {
+        Ride ride = rideInProgress(pax.userId(), mot.userId());
+        ride.setPaymentMethod(PaymentMethod.DINHEIRO);
+        ride.setPaymentStatus(PaymentStatus.PENDING);
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        assertThatThrownBy(() -> rideService.confirmCashPayment(mot, ride.getId(),
+                new CashPaymentRequest(new BigDecimal("20.00"), null)))
+                .isInstanceOf(CashPaymentNotAllowedException.class);
+    }
+
+    @Test
+    @DisplayName("cash-payment: corrida Pix → 409")
+    void cashPaymentOnPixRide() {
+        Ride ride = completedCashRide();
+        ride.setPaymentMethod(PaymentMethod.PIX);
+        ride.setPaymentStatus(PaymentStatus.SIMULATED);
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        assertThatThrownBy(() -> rideService.confirmCashPayment(mot, ride.getId(),
+                new CashPaymentRequest(new BigDecimal("20.00"), null)))
+                .isInstanceOf(CashPaymentNotAllowedException.class);
+    }
+
+    @Test
+    @DisplayName("cash-payment: segundo registro → 409 (registro unico)")
+    void cashPaymentOnlyOnce() {
+        Ride ride = completedCashRide();
+        ride.setPaymentStatus(PaymentStatus.CONFIRMED);
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        assertThatThrownBy(() -> rideService.confirmCashPayment(mot, ride.getId(),
+                new CashPaymentRequest(new BigDecimal("20.00"), null)))
+                .isInstanceOf(CashPaymentNotAllowedException.class);
+    }
+
+    @Test
+    @DisplayName("cash-payment: motorista que nao aceitou a corrida → 403")
+    void cashPaymentByOtherDriver() {
+        Ride ride = completedCashRide();
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+        AuthenticatedUser outroMot = new AuthenticatedUser(UUID.randomUUID(), "o@x.com", Role.MOTORISTA, CIDADE);
+
+        assertThatThrownBy(() -> rideService.confirmCashPayment(outroMot, ride.getId(),
+                new CashPaymentRequest(new BigDecimal("20.00"), null)))
+                .isInstanceOf(RideAccessDeniedException.class);
+    }
+
+    private Ride completedCashRide() {
+        Ride r = rideInProgress(pax.userId(), mot.userId());
+        r.setStatus(RideStatus.COMPLETED);
+        r.setCompletedAt(Instant.now());
+        r.setPaymentMethod(PaymentMethod.DINHEIRO);
+        r.setPaymentStatus(PaymentStatus.PENDING);
+        return r;
     }
 
     // ------------------------------------------------------------------------

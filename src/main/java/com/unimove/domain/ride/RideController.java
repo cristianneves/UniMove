@@ -2,6 +2,7 @@ package com.unimove.domain.ride;
 
 import com.unimove.domain.ride.dto.AcceptRideRequest;
 import com.unimove.domain.ride.dto.CancelRideRequest;
+import com.unimove.domain.ride.dto.CashPaymentRequest;
 import com.unimove.domain.ride.dto.ConfirmPaymentRequest;
 import com.unimove.domain.ride.dto.CreateRideRequest;
 import com.unimove.domain.ride.dto.EstimateRequest;
@@ -117,6 +118,14 @@ public class RideController {
     public RideResponse complete(@AuthenticationPrincipal AuthenticatedUser user,
                                  @PathVariable UUID id) {
         return rideService.complete(user, id);
+    }
+
+    @PostMapping("/{id}/cash-payment")
+    @PreAuthorize("hasRole('MOTORISTA')")
+    public RideResponse cashPayment(@AuthenticationPrincipal AuthenticatedUser user,
+                                    @PathVariable UUID id,
+                                    @Valid @RequestBody CashPaymentRequest req) {
+        return rideService.confirmCashPayment(user, id, req);
     }
 
     @PostMapping("/{id}/cancel")

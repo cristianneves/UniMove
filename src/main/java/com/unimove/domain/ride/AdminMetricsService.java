@@ -2,6 +2,7 @@ package com.unimove.domain.ride;
 
 import com.unimove.domain.ride.dto.AdminMetricsResponse;
 import com.unimove.domain.ride.dto.MetricsDayItem;
+import com.unimove.domain.ride.dto.PaymentMetricsAggregate;
 import com.unimove.domain.ride.dto.RideMetricsAggregate;
 import com.unimove.domain.user.UserStatsService;
 import com.unimove.domain.user.dto.UserStatsSnapshot;
@@ -69,6 +70,13 @@ public class AdminMetricsService {
         AdminMetricsResponse.RevenueSummary revenue =
                 new AdminMetricsResponse.RevenueSummary(gross, cancellationFees, averageTicket);
 
+        PaymentMetricsAggregate pay = rideRepository.aggregatePaymentMetrics(fromInstant, toInstantExclusive);
+        AdminMetricsResponse.PaymentsSummary payments = pay == null
+                ? new AdminMetricsResponse.PaymentsSummary(BigDecimal.ZERO, 0, 0, 0)
+                : new AdminMetricsResponse.PaymentsSummary(
+                        pay.cashConfirmed() == null ? BigDecimal.ZERO : pay.cashConfirmed(),
+                        orZero(pay.cashPending()), orZero(pay.cashDivergent()), orZero(pay.pixSimulated()));
+
         UserStatsSnapshot u = userStatsService.snapshot();
         AdminMetricsResponse.UsersSummary users = new AdminMetricsResponse.UsersSummary(
                 u.totalPassengers(), u.totalDrivers(), u.onlineDrivers(),
@@ -83,7 +91,11 @@ public class AdminMetricsService {
                         row.getRevenue() == null ? BigDecimal.ZERO : row.getRevenue()))
                 .toList();
 
-        return new AdminMetricsResponse(effectiveFrom, effectiveTo, rides, revenue, users, byDay);
+        return new AdminMetricsResponse(effectiveFrom, effectiveTo, rides, revenue, payments, users, byDay);
+    }
+
+    private static long orZero(Long value) {
+        return value == null ? 0L : value;
     }
 
     /** Fração [0,1] arredondada a 4 casas; 0 quando não há corridas. */

@@ -1,6 +1,7 @@
 package com.unimove.domain.ride.dto;
 
 import com.unimove.domain.ride.PaymentMethod;
+import com.unimove.domain.ride.PaymentStatus;
 import com.unimove.domain.ride.RideCategory;
 import com.unimove.domain.ride.RideStatus;
 
@@ -14,6 +15,9 @@ public record AdminRideItem(
         RideStatus status,
         RideCategory category,
         PaymentMethod paymentMethod,
+        PaymentStatus paymentStatus,
+        BigDecimal cashReceivedAmount,
+        String paymentNote,
         BigDecimal preco,
         BigDecimal surgeMultiplier,
         BigDecimal cancellationFee,

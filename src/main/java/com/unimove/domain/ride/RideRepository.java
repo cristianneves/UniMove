@@ -51,7 +51,7 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
     @Query("""
             SELECT new com.unimove.domain.ride.dto.RideMuralItem(
                 r.id, r.latOrigem, r.lngOrigem, r.latDestino, r.lngDestino,
-                r.distanciaKm, r.tempoMin, r.preco, r.category, r.paymentMethod, r.createdAt
+                r.distanciaKm, r.tempoMin, r.preco, r.category, r.paymentMethod, r.cashChangeFor, r.createdAt
             )
             FROM Ride r
             WHERE r.status = com.unimove.domain.ride.RideStatus.AVAILABLE_IN_MURAL
@@ -65,15 +65,21 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
     @Query(
             value = """
                     SELECT new com.unimove.domain.ride.dto.AdminRideItem(
-                        r.id, r.cidade, r.status, r.category, r.paymentMethod, r.preco, r.surgeMultiplier,
+                        r.id, r.cidade, r.status, r.category, r.paymentMethod,
+                        r.paymentStatus, r.cashReceivedAmount, r.paymentNote,
+                        r.preco, r.surgeMultiplier,
                         r.cancellationFee, r.passageiroId, r.motoristaId,
                         r.createdAt, r.acceptedAt, r.completedAt, r.cancelledAt
                     )
                     FROM Ride r
+                    WHERE (:paymentStatus IS NULL OR r.paymentStatus = :paymentStatus)
                     """,
-            countQuery = "SELECT count(r) FROM Ride r"
+            countQuery = """
+                    SELECT count(r) FROM Ride r
+                    WHERE (:paymentStatus IS NULL OR r.paymentStatus = :paymentStatus)
+                    """
     )
-    Page<AdminRideItem> findAllForAdmin(Pageable pageable);
+    Page<AdminRideItem> findAllForAdmin(@Param("paymentStatus") PaymentStatus paymentStatus, Pageable pageable);
 
     /** Demanda do surge: corridas aguardando aceite no mural da cidade+categoria. */
     long countByStatusAndCidadeAndCategory(RideStatus status, String cidade, RideCategory category);
@@ -98,7 +104,7 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
                     SELECT new com.unimove.domain.ride.dto.RideHistoryItem(
                         r.id, r.status, r.cidade, r.category,
                         r.latOrigem, r.lngOrigem, r.latDestino, r.lngDestino,
-                        r.distanciaKm, r.tempoMin, r.preco, r.cancellationFee, r.paymentMethod,
+                        r.distanciaKm, r.tempoMin, r.preco, r.cancellationFee, r.paymentMethod, r.paymentStatus,
                         r.passageiroId, r.motoristaId,
                         r.createdAt, r.completedAt, r.cancelledAt
                     )
@@ -122,7 +128,7 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
                     SELECT new com.unimove.domain.ride.dto.RideHistoryItem(
                         r.id, r.status, r.cidade, r.category,
                         r.latOrigem, r.lngOrigem, r.latDestino, r.lngDestino,
-                        r.distanciaKm, r.tempoMin, r.preco, r.cancellationFee, r.paymentMethod,
+                        r.distanciaKm, r.tempoMin, r.preco, r.cancellationFee, r.paymentMethod, r.paymentStatus,
                         r.passageiroId, r.motoristaId,
                         r.createdAt, r.completedAt, r.cancelledAt
                     )
@@ -173,6 +179,28 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
             """)
     com.unimove.domain.ride.dto.RideMetricsAggregate aggregateRideMetrics(@Param("from") Instant from,
                                                                           @Param("to") Instant to);
+
+    /**
+     * Situacao dos recebimentos no periodo (por created_at): dinheiro
+     * confirmado (valor registrado pelo motorista), pendente e divergente, e
+     * quantas corridas Pix foram so simuladas — separadas de proposito para o
+     * painel nao confundir simulacao com receita.
+     */
+    @Query("""
+            SELECT new com.unimove.domain.ride.dto.PaymentMetricsAggregate(
+                COALESCE(SUM(CASE WHEN r.paymentStatus = com.unimove.domain.ride.PaymentStatus.CONFIRMED
+                                  THEN r.cashReceivedAmount ELSE 0 END), 0),
+                SUM(CASE WHEN r.paymentStatus = com.unimove.domain.ride.PaymentStatus.PENDING
+                          AND r.status = com.unimove.domain.ride.RideStatus.COMPLETED THEN 1L ELSE 0L END),
+                SUM(CASE WHEN r.paymentStatus = com.unimove.domain.ride.PaymentStatus.DIVERGENT THEN 1L ELSE 0L END),
+                SUM(CASE WHEN r.paymentStatus = com.unimove.domain.ride.PaymentStatus.SIMULATED
+                          AND r.status = com.unimove.domain.ride.RideStatus.COMPLETED THEN 1L ELSE 0L END)
+            )
+            FROM Ride r
+            WHERE r.createdAt >= :from AND r.createdAt < :to
+            """)
+    com.unimove.domain.ride.dto.PaymentMetricsAggregate aggregatePaymentMetrics(@Param("from") Instant from,
+                                                                                @Param("to") Instant to);
 
     interface RideMetricsDayRow {
         java.sql.Date getDay();

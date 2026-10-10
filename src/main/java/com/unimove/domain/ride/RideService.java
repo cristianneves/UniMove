@@ -8,6 +8,7 @@ import com.unimove.domain.payment.PaymentService;
 import com.unimove.domain.ride.dto.AcceptRideRequest;
 import com.unimove.domain.ride.dto.AdminRideItem;
 import com.unimove.domain.ride.dto.CancelRideRequest;
+import com.unimove.domain.ride.dto.CashPaymentRequest;
 import com.unimove.domain.ride.dto.CategoryOption;
 import com.unimove.domain.ride.dto.ConfirmPaymentRequest;
 import com.unimove.domain.ride.dto.CreateRideRequest;
@@ -254,9 +255,23 @@ public class RideService {
 
         RideStateMachine.assertCanTransition(ride.getStatus(), RideStatus.AVAILABLE_IN_MURAL);
 
+        if (req.changeFor() != null) {
+            if (req.method() != PaymentMethod.DINHEIRO) {
+                throw new InvalidCashPaymentException("Troco só se aplica a pagamento em dinheiro.");
+            }
+            if (req.changeFor().compareTo(ride.getPreco()) < 0) {
+                throw new InvalidCashPaymentException(
+                        "O valor para troco precisa cobrir o preço da corrida (R$ " + ride.getPreco() + ").");
+            }
+        }
+
         ride.setPaymentMethod(req.method());
         if (req.method() == PaymentMethod.PIX) {
             ride.setPixPayload(paymentService.generatePixPayload(ride.getId(), ride.getPreco()));
+            ride.setPaymentStatus(PaymentStatus.SIMULATED);
+        } else {
+            ride.setCashChangeFor(req.changeFor());
+            ride.setPaymentStatus(PaymentStatus.PENDING);
         }
         ride.setStatus(RideStatus.AVAILABLE_IN_MURAL);
 
@@ -379,6 +394,46 @@ public class RideService {
         log.info("Ride {} finalizada pelo motorista {}", ride.getId(), motorista.userId());
         chatSseHub.closeRide(rideId);
         publishStatus(ride);
+        return RideResponse.from(ride);
+    }
+
+    /**
+     * Motorista registra o dinheiro recebido apos concluir a corrida. Valor
+     * menor que o preco vira DIVERGENT (com observacao obrigatoria) e entra na
+     * fila de conciliacao do admin; nunca e tratado como pagamento eletronico.
+     * Registro unico: corrigir depois e tarefa do admin.
+     */
+    @Transactional
+    public RideResponse confirmCashPayment(AuthenticatedUser motorista, UUID rideId, CashPaymentRequest req) {
+        Ride ride = loadAsAcceptingDriver(motorista, rideId);
+        if (ride.getStatus() != RideStatus.COMPLETED) {
+            throw new CashPaymentNotAllowedException("O recebimento só é registrado após concluir a corrida.");
+        }
+        if (ride.getPaymentMethod() != PaymentMethod.DINHEIRO) {
+            throw new CashPaymentNotAllowedException("Esta corrida não foi paga em dinheiro.");
+        }
+        if (ride.getPaymentStatus() != PaymentStatus.PENDING) {
+            throw new CashPaymentNotAllowedException("O recebimento desta corrida já foi registrado.");
+        }
+
+        String note = trimToNull(req.note());
+        boolean divergent = req.receivedAmount().compareTo(ride.getPreco()) < 0;
+        if (divergent && note == null) {
+            throw new InvalidCashPaymentException(
+                    "Valor abaixo do preço da corrida: descreva o ocorrido em 'note'.");
+        }
+
+        ride.setCashReceivedAmount(req.receivedAmount());
+        ride.setPaymentNote(note);
+        ride.setPaymentConfirmedAt(Instant.now());
+        ride.setPaymentStatus(divergent ? PaymentStatus.DIVERGENT : PaymentStatus.CONFIRMED);
+
+        if (divergent) {
+            log.warn("Ride {}: dinheiro divergente (preco={}, recebido={})",
+                    rideId, ride.getPreco(), req.receivedAmount());
+        } else {
+            log.info("Ride {}: dinheiro recebido confirmado pelo motorista {}", rideId, motorista.userId());
+        }
         return RideResponse.from(ride);
     }
 
@@ -561,8 +616,8 @@ public class RideService {
     }
 
     @Transactional(readOnly = true)
-    public Page<AdminRideItem> listAdminRides(Pageable pageable) {
-        return rideRepository.findAllForAdmin(pageable);
+    public Page<AdminRideItem> listAdminRides(PaymentStatus paymentStatus, Pageable pageable) {
+        return rideRepository.findAllForAdmin(paymentStatus, pageable);
     }
 
     @Transactional

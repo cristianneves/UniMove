@@ -1,6 +1,7 @@
 package com.unimove.domain.ride;
 
 import com.unimove.domain.ride.dto.AdminMetricsResponse;
+import com.unimove.domain.ride.dto.PaymentMetricsAggregate;
 import com.unimove.domain.ride.dto.RideMetricsAggregate;
 import com.unimove.domain.user.UserStatsService;
 import com.unimove.domain.user.dto.UserStatsSnapshot;
@@ -94,6 +95,37 @@ class AdminMetricsServiceTest {
                 .isEqualTo(today.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant());
         assertThat(fromCap.getValue())
                 .isEqualTo(today.minusDays(29).atStartOfDay(ZoneOffset.UTC).toInstant());
+    }
+
+    @Test
+    void recebimentosSeparamDinheiroConfirmadoDePixSimulado() {
+        stubUsers();
+        when(rideRepository.aggregateRideMetrics(any(), any()))
+                .thenReturn(new RideMetricsAggregate(5, 5, 0, 0, new BigDecimal("100.00"), BigDecimal.ZERO));
+        when(rideRepository.aggregatePaymentMetrics(any(), any()))
+                .thenReturn(new PaymentMetricsAggregate(new BigDecimal("40.00"), 1L, 1L, 2L));
+        when(rideRepository.findRideMetricsByDay(any(), any())).thenReturn(List.of());
+
+        AdminMetricsResponse res = service.getMetrics(LocalDate.of(2026, 6, 1), LocalDate.of(2026, 6, 10));
+
+        assertThat(res.payments().cashConfirmed()).isEqualByComparingTo("40.00");
+        assertThat(res.payments().cashPending()).isEqualTo(1);
+        assertThat(res.payments().cashDivergent()).isEqualTo(1);
+        assertThat(res.payments().pixSimulated()).isEqualTo(2);
+    }
+
+    @Test
+    void recebimentosNulosViramZeros() {
+        stubUsers();
+        when(rideRepository.aggregateRideMetrics(any(), any())).thenReturn(null);
+        when(rideRepository.aggregatePaymentMetrics(any(), any()))
+                .thenReturn(new PaymentMetricsAggregate(null, null, null, null));
+        when(rideRepository.findRideMetricsByDay(any(), any())).thenReturn(List.of());
+
+        AdminMetricsResponse res = service.getMetrics(null, null);
+
+        assertThat(res.payments().cashConfirmed()).isEqualByComparingTo("0");
+        assertThat(res.payments().cashPending()).isZero();
     }
 
     @Test

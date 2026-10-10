@@ -1,6 +1,7 @@
 package com.unimove.domain.ride.dto;
 
 import com.unimove.domain.ride.PaymentMethod;
+import com.unimove.domain.ride.PaymentStatus;
 import com.unimove.domain.ride.RideCategory;
 import com.unimove.domain.ride.RideStatus;
 
@@ -22,6 +23,7 @@ public record RideHistoryItem(
         BigDecimal preco,
         BigDecimal cancellationFee,
         PaymentMethod paymentMethod,
+        PaymentStatus paymentStatus,
         UUID passageiroId,
         UUID motoristaId,
         Instant createdAt,
