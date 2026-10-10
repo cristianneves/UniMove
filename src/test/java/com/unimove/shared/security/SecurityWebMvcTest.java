@@ -6,6 +6,7 @@ import com.unimove.domain.ride.AdminRideController;
 import com.unimove.domain.ride.RideAccessDeniedException;
 import com.unimove.domain.ride.RideController;
 import com.unimove.domain.ride.RideService;
+import com.unimove.domain.ride.RideShareService;
 import com.unimove.domain.user.DriverService;
 import com.unimove.domain.user.Role;
 import com.unimove.domain.user.User;
@@ -53,6 +54,7 @@ class SecurityWebMvcTest {
 
     @MockBean AccountStatusChecker accountStatusChecker;
     @MockBean RideService rideService;
+    @MockBean RideShareService rideShareService;
     @MockBean CityCatalog cityCatalog;
     // Exigido pelo LastSeenInterceptor, registrado no WebMvcConfig da aplicacao.
     @MockBean DriverService driverService;

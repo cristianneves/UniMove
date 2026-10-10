@@ -66,6 +66,7 @@ class RideControllerContractTest {
     @Autowired MockMvc mvc;
 
     @MockBean RideService rideService;
+    @MockBean RideShareService rideShareService;
     @MockBean com.unimove.shared.security.JwtService jwtService;
     @MockBean com.unimove.shared.security.JwtAuthenticationFilter jwtAuthenticationFilter;
     @MockBean DriverService driverService;
@@ -321,6 +322,22 @@ class RideControllerContractTest {
                 .andExpect(jsonPath("$.content[0].destinoEndereco").value("Rodoviária"))
                 .andExpect(jsonPath("$.totalElements").value(6));
         mvc.perform(get("/rides/history?status=VOANDO")).andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("GET /rides/{id}/share-link → 200 com token e path; encerrada → 410")
+    void shareLink() throws Exception {
+        UUID token = UUID.randomUUID();
+        when(rideShareService.getLink(user, rideId))
+                .thenReturn(com.unimove.domain.ride.dto.ShareLinkResponse.of(token))
+                .thenThrow(new ShareLinkExpiredException());
+
+        mvc.perform(get("/rides/" + rideId + "/share-link"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.token").value(token.toString()))
+                .andExpect(jsonPath("$.path").value("/share/" + token));
+        mvc.perform(get("/rides/" + rideId + "/share-link"))
+                .andExpect(status().isGone());
     }
 
     // ------------------------------------------------------------------------
