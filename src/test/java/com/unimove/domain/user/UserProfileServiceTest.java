@@ -2,6 +2,7 @@ package com.unimove.domain.user;
 
 import com.unimove.domain.city.CityCatalog;
 import com.unimove.domain.city.CityNotServedException;
+import com.unimove.domain.verification.PhoneVerificationService;
 import com.unimove.domain.user.dto.AdminResetPasswordResponse;
 import com.unimove.domain.user.dto.UpdateProfileRequest;
 import com.unimove.domain.user.dto.UpdateProfileResponse;
@@ -44,6 +45,7 @@ class UserProfileServiceTest {
     @Mock PasswordEncoder passwordEncoder;
     @Mock JwtService jwtService;
     @Mock CityCatalog cityCatalog;
+    @Mock PhoneVerificationService phoneVerificationService;
     @Mock com.unimove.domain.audit.AdminAuditLog auditLog;
 
     @InjectMocks UserProfileService service;
@@ -85,6 +87,31 @@ class UserProfileServiceTest {
         assertThat(user.isMustChangePassword()).isFalse();
         assertThat(resp.token()).isEqualTo("jwt-novo");
         assertThat(resp.mustChangePassword()).isFalse();
+    }
+
+    @Test
+    @DisplayName("changePhone troca para o numero verificado no WhatsApp")
+    void changePhoneHappyPath() {
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+        when(phoneVerificationService.consumeVerifiedPhone("tok")).thenReturn("5574988887777");
+
+        var resp = service.changePhone(auth, "tok");
+
+        assertThat(user.getPhone()).isEqualTo("5574988887777");
+        assertThat(user.getPhoneVerifiedAt()).isNotNull();
+        assertThat(resp.phone()).isEqualTo("5574988887777");
+    }
+
+    @Test
+    @DisplayName("changePhone para numero de outra conta → 409 sem alterar")
+    void changePhoneInUse() {
+        String before = user.getPhone();
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+        when(phoneVerificationService.consumeVerifiedPhone("tok")).thenReturn("5574911112222");
+        when(userRepository.existsByPhone("5574911112222")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.changePhone(auth, "tok")).isInstanceOf(PhoneAlreadyUsedException.class);
+        assertThat(user.getPhone()).isEqualTo(before);
     }
 
     @Test

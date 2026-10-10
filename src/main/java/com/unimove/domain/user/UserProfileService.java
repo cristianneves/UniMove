@@ -3,6 +3,7 @@ package com.unimove.domain.user;
 import com.unimove.domain.audit.AdminAuditLog;
 import com.unimove.domain.audit.AuditAction;
 import com.unimove.domain.city.CityCatalog;
+import com.unimove.domain.verification.PhoneVerificationService;
 import com.unimove.domain.user.dto.AdminResetPasswordResponse;
 import com.unimove.domain.user.dto.AuthResponse;
 import com.unimove.domain.user.dto.UpdateProfileRequest;
@@ -36,6 +37,7 @@ public class UserProfileService {
     private final JwtService jwtService;
     private final CityCatalog cityCatalog;
     private final AdminAuditLog auditLog;
+    private final PhoneVerificationService phoneVerificationService;
     private final SecureRandom random = new SecureRandom();
 
     public UserProfileService(UserRepository userRepository,
@@ -43,13 +45,38 @@ public class UserProfileService {
                               PasswordEncoder passwordEncoder,
                               JwtService jwtService,
                               CityCatalog cityCatalog,
-                              AdminAuditLog auditLog) {
+                              AdminAuditLog auditLog,
+                              PhoneVerificationService phoneVerificationService) {
         this.userRepository = userRepository;
         this.driverRepository = driverRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.cityCatalog = cityCatalog;
         this.auditLog = auditLog;
+        this.phoneVerificationService = phoneVerificationService;
+    }
+
+    /**
+     * Troca o telefone pelo numero provado num novo desafio do WhatsApp. O
+     * desafio ja recusa numero de outra conta (PHONE_IN_USE); a checagem aqui
+     * fecha a corrida entre o desafio e esta chamada — e o indice unico
+     * ux_users_phone fecha o resto.
+     */
+    @Transactional
+    public UserProfileResponse changePhone(AuthenticatedUser auth, String verificationToken) {
+        User user = userRepository.findById(auth.userId())
+                .orElseThrow(UserNotFoundException::new);
+        String phone = phoneVerificationService.consumeVerifiedPhone(verificationToken);
+        if (!phone.equals(user.getPhone()) && userRepository.existsByPhone(phone)) {
+            throw new PhoneAlreadyUsedException();
+        }
+        user.setPhone(phone);
+        user.setPhoneVerifiedAt(Instant.now());
+        log.info("Usuario {} trocou o telefone (verificado via WhatsApp)", user.getId());
+        Driver driver = user.getRole() == Role.MOTORISTA
+                ? driverRepository.findById(user.getId()).orElse(null)
+                : null;
+        return UserProfileResponse.from(user, driver);
     }
 
     @Transactional(readOnly = true)

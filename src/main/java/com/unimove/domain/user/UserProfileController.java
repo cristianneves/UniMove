@@ -2,6 +2,7 @@ package com.unimove.domain.user;
 
 import com.unimove.domain.user.dto.AuthResponse;
 import com.unimove.domain.user.dto.ChangePasswordRequest;
+import com.unimove.domain.user.dto.ChangePhoneRequest;
 import com.unimove.domain.user.dto.UpdateProfileRequest;
 import com.unimove.domain.user.dto.UpdateProfileResponse;
 import com.unimove.domain.user.dto.UserProfileResponse;
@@ -46,6 +47,15 @@ public class UserProfileController {
     public UpdateProfileResponse updateProfile(@AuthenticationPrincipal AuthenticatedUser user,
                                                @Valid @RequestBody UpdateProfileRequest req) {
         return userProfileService.updateProfile(user, req);
+    }
+
+    @PutMapping("/phone")
+    @Operation(summary = "Troca o telefone",
+            description = "Faça antes o desafio do WhatsApp com o número novo (POST /auth/phone/challenge) e envie "
+                    + "o `verificationToken`. 409 se o número já pertence a outra conta.")
+    public UserProfileResponse changePhone(@AuthenticationPrincipal AuthenticatedUser user,
+                                           @Valid @RequestBody ChangePhoneRequest req) {
+        return userProfileService.changePhone(user, req.verificationToken());
     }
 
     @PutMapping("/password")
