@@ -7,12 +7,15 @@ import com.unimove.domain.user.DriverNotFoundException;
 import com.unimove.domain.user.DriverRepository;
 import com.unimove.domain.user.VehicleType;
 import com.unimove.domain.user.document.dto.DocumentFileUrlResponse;
+import com.unimove.domain.user.document.dto.PendingDocumentItem;
 import com.unimove.domain.user.document.dto.DriverDocumentItem;
 import com.unimove.domain.user.document.dto.DriverDocumentationResponse;
 import com.unimove.domain.user.document.dto.DriverProfileRequest;
 import com.unimove.shared.util.Cpf;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -83,6 +86,30 @@ public class DriverDocumentService {
         Driver driver = loadDriver(driverId);
         List<DriverDocument> history = documentRepository.findByDriverIdOrderByCreatedAtDesc(driverId);
         return toResponse(driver, history);
+    }
+
+    /** Situacao consolidada de um motorista ja carregado (fila de pendentes do admin). */
+    @Transactional(readOnly = true)
+    public DocumentationStatus statusOf(Driver driver) {
+        return evaluate(driver, currentByType(
+                documentRepository.findByDriverIdOrderByCreatedAtDesc(driver.getUserId())), new ArrayList<>());
+    }
+
+    /**
+     * Mesma visao do motorista, aberta pelo admin: mostra CPF e CNH, entao o
+     * acesso fica na trilha de auditoria.
+     */
+    @Transactional
+    public DriverDocumentationResponse getDocumentationForAdmin(UUID driverId, UUID adminId) {
+        DriverDocumentationResponse resp = getDocumentation(driverId);
+        auditLog.record(adminId, AuditAction.DRIVER_DOCUMENTATION_VIEWED, "USER", driverId, null);
+        return resp;
+    }
+
+    /** Fila de analise: envios aguardando o admin, mais antigos primeiro. */
+    @Transactional(readOnly = true)
+    public Page<PendingDocumentItem> pendingDocuments(Pageable pageable) {
+        return documentRepository.findPendingReview(pageable);
     }
 
     /** Lanca 409 com o que falta se a documentacao nao permite aprovar o motorista. */
@@ -163,8 +190,10 @@ public class DriverDocumentService {
         Driver driver = loadDriver(driverId);
         DriverDocument current = documentRepository
                 .findFirstByDriverIdAndTypeOrderByCreatedAtDesc(driverId, type).orElse(null);
+        // CNH vencida libera reenvio da aprovada — mas nao duplica um envio ja em analise.
         boolean renewingExpiredCnh = type == DriverDocumentType.CNH
-                && driver.getCnhExpiresOn() != null && !driver.hasValidCnh(today());
+                && driver.getCnhExpiresOn() != null && !driver.hasValidCnh(today())
+                && current != null && current.getStatus() == DriverDocumentStatus.APPROVED;
         if (current != null && current.getStatus() != DriverDocumentStatus.REJECTED && !renewingExpiredCnh) {
             throw new DocumentUploadNotAllowedException(current.getStatus() == DriverDocumentStatus.SUBMITTED
                     ? "Este documento já foi enviado e aguarda análise."

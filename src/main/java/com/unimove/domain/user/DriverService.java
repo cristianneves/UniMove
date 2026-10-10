@@ -13,7 +13,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.LocalDate;
-import java.util.List;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -130,8 +131,11 @@ public class DriverService {
     }
 
     @Transactional(readOnly = true)
-    public List<PendingDriverItem> listPending() {
-        return driverRepository.findPending();
+    public Page<PendingDriverItem> listPending(Pageable pageable) {
+        return driverRepository.findPending(pageable).map(d -> new PendingDriverItem(
+                d.getUserId(), d.getUser().getName(), d.getUser().getEmail(), d.getUser().getPhone(),
+                d.getUser().getCidade(), d.getVehicleType(), d.getVehiclePlate(), d.getUser().getCreatedAt(),
+                documentService.statusOf(d)));
     }
 
     @Transactional

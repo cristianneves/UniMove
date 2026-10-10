@@ -32,9 +32,11 @@ public class AdminDriverDocumentController {
     }
 
     @GetMapping("/documentation")
-    @Operation(summary = "Dados declarados, documentos vigentes e histórico de envios do motorista")
-    public DriverDocumentationResponse get(@PathVariable UUID driverId) {
-        return service.getDocumentation(driverId);
+    @Operation(summary = "Dados declarados, documentos vigentes e histórico de envios do motorista",
+            description = "Mostra CPF e CNH: o acesso fica na trilha de auditoria.")
+    public DriverDocumentationResponse get(@AuthenticationPrincipal AuthenticatedUser admin,
+                                           @PathVariable UUID driverId) {
+        return service.getDocumentationForAdmin(driverId, admin.userId());
     }
 
     @GetMapping("/documents/{documentId}/file")

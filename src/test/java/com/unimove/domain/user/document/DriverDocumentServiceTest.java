@@ -273,6 +273,35 @@ class DriverDocumentServiceTest {
     }
 
     @Test
+    @DisplayName("CNH vencida com envio ja em analise nao duplica o envio → 409")
+    void expiredCnhDoesNotDuplicateSubmitted() {
+        completeProfile(TODAY.minusDays(1));
+        when(documentRepository.findFirstByDriverIdAndTypeOrderByCreatedAtDesc(driverId, DriverDocumentType.CNH))
+                .thenReturn(Optional.of(doc(DriverDocumentType.CNH, DriverDocumentStatus.SUBMITTED)));
+
+        assertThatThrownBy(() -> service.upload(driverId, DriverDocumentType.CNH, file(DocumentFileInspectorTest.JPEG)))
+                .isInstanceOf(DocumentUploadNotAllowedException.class);
+        verifyNoInteractions(storage);
+    }
+
+    @Test
+    @DisplayName("admin ver a documentacao (CPF/CNH) fica auditado")
+    void adminViewIsAudited() {
+        service.getDocumentationForAdmin(driverId, adminId);
+
+        verify(auditLog).record(adminId, AuditAction.DRIVER_DOCUMENTATION_VIEWED, "USER", driverId, null);
+    }
+
+    @Test
+    @DisplayName("statusOf calcula a situacao de um motorista ja carregado")
+    void statusOfLoadedDriver() {
+        completeProfile(TODAY.plusYears(1));
+        allDocs(DriverDocumentStatus.APPROVED);
+
+        assertThat(service.statusOf(driver)).isEqualTo(DocumentationStatus.APPROVED);
+    }
+
+    @Test
     @DisplayName("arquivo de tipo nao suportado → 400 sem tocar no storage")
     void uploadRejectsUnknownType() {
         assertThatThrownBy(() -> service.upload(driverId, DriverDocumentType.CNH, file("GIF89a".getBytes())))

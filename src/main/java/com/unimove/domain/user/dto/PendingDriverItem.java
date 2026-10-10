@@ -1,10 +1,12 @@
 package com.unimove.domain.user.dto;
 
 import com.unimove.domain.user.VehicleType;
+import com.unimove.domain.user.document.DocumentationStatus;
 
 import java.time.Instant;
 import java.util.UUID;
 
+/** Motorista aguardando aprovacao, com a situacao documental para o admin priorizar. */
 public record PendingDriverItem(
         UUID userId,
         String name,
@@ -13,5 +15,6 @@ public record PendingDriverItem(
         String cidade,
         VehicleType vehicleType,
         String vehiclePlate,
-        Instant registeredAt
+        Instant registeredAt,
+        DocumentationStatus documentationStatus
 ) {}

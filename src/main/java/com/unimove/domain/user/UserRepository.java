@@ -28,6 +28,30 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     long countByRole(Role role);
 
+    long countByRoleAndStatusNot(Role role, UserStatus status);
+
+    /** Busca do admin: texto em nome/e-mail/telefone + filtros opcionais. Excluidos so se pedidos por status. */
+    @Query(
+            value = """
+                    SELECT u FROM User u
+                    WHERE (:q IS NULL OR LOWER(u.name) LIKE :q OR LOWER(u.email) LIKE :q OR u.phone LIKE :q)
+                      AND (:role IS NULL OR u.role = :role)
+                      AND (:status IS NULL OR u.status = :status)
+                      AND (:status IS NOT NULL OR u.status <> com.unimove.domain.user.UserStatus.DELETED)
+                      AND (:cidade IS NULL OR u.cidade = :cidade)
+                    """,
+            countQuery = """
+                    SELECT count(u) FROM User u
+                    WHERE (:q IS NULL OR LOWER(u.name) LIKE :q OR LOWER(u.email) LIKE :q OR u.phone LIKE :q)
+                      AND (:role IS NULL OR u.role = :role)
+                      AND (:status IS NULL OR u.status = :status)
+                      AND (:status IS NOT NULL OR u.status <> com.unimove.domain.user.UserStatus.DELETED)
+                      AND (:cidade IS NULL OR u.cidade = :cidade)
+                    """
+    )
+    Page<User> search(@Param("q") String q, @Param("role") Role role, @Param("status") UserStatus status,
+                      @Param("cidade") String cidade, Pageable pageable);
+
     List<User> findByRole(Role role);
 
     long countByStatus(UserStatus status);

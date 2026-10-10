@@ -1,13 +1,13 @@
 package com.unimove.domain.user;
 
-import com.unimove.domain.user.dto.PendingDriverItem;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
-import java.util.List;
 import java.util.UUID;
 
 public interface DriverRepository extends JpaRepository<Driver, UUID> {
@@ -29,16 +29,28 @@ public interface DriverRepository extends JpaRepository<Driver, UUID> {
             """)
     int markStaleOnlineDriversOffline(@Param("cutoff") Instant cutoff);
 
+    /** Motoristas aguardando aprovacao (sem os excluidos), mais antigos primeiro. */
+    @Query(
+            value = """
+                    SELECT d FROM Driver d JOIN FETCH d.user u
+                    WHERE d.approved = false AND u.status <> com.unimove.domain.user.UserStatus.DELETED
+                    ORDER BY u.createdAt ASC
+                    """,
+            countQuery = """
+                    SELECT count(d) FROM Driver d
+                    WHERE d.approved = false AND d.user.status <> com.unimove.domain.user.UserStatus.DELETED
+                    """
+    )
+    Page<Driver> findPending(Pageable pageable);
+
+    @Query("SELECT count(d) FROM Driver d WHERE d.user.status <> com.unimove.domain.user.UserStatus.DELETED")
+    long countNotDeleted();
+
     @Query("""
-            SELECT new com.unimove.domain.user.dto.PendingDriverItem(
-                d.user.id, d.user.name, d.user.email, d.user.phone, d.user.cidade,
-                d.vehicleType, d.vehiclePlate, d.user.createdAt
-            )
-            FROM Driver d
-            WHERE d.approved = false
-            ORDER BY d.user.createdAt ASC
+            SELECT count(d) FROM Driver d
+            WHERE d.approved = false AND d.user.status <> com.unimove.domain.user.UserStatus.DELETED
             """)
-    List<PendingDriverItem> findPending();
+    long countPendingNotDeleted();
 
     boolean existsByCpfAndIdNot(String cpf, UUID id);
 

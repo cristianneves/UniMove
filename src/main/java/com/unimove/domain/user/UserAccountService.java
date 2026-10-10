@@ -2,9 +2,11 @@ package com.unimove.domain.user;
 
 import com.unimove.domain.audit.AdminAuditLog;
 import com.unimove.domain.audit.AuditAction;
+import com.unimove.domain.user.dto.AdminUserItem;
 import com.unimove.domain.user.dto.PassengerPublicInfo;
 import com.unimove.domain.user.dto.UserStatusResponse;
 import com.unimove.shared.security.AccountStatusChecker;
+import com.unimove.shared.util.CityNormalizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -97,6 +99,13 @@ public class UserAccountService implements UserDirectory, AccountStatusChecker {
     @Transactional(readOnly = true)
     public long countByCidade(String cidade) {
         return userRepository.countByCidade(cidade);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<AdminUserItem> search(String query, Role role, UserStatus status, String cidade, Pageable pageable) {
+        String q = query == null || query.isBlank() ? null : "%" + query.trim().toLowerCase() + "%";
+        String city = cidade == null || cidade.isBlank() ? null : CityNormalizer.normalize(cidade);
+        return userRepository.search(q, role, status, city, pageable).map(AdminUserItem::from);
     }
 
     @Transactional(readOnly = true)

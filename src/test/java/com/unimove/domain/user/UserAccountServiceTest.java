@@ -16,6 +16,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -70,6 +71,20 @@ class UserAccountServiceTest {
 
         assertThat(user.getStatus()).isEqualTo(UserStatus.ACTIVE);
         verify(auditLog).record(adminId, AuditAction.USER_REACTIVATED, "USER", userId, null);
+    }
+
+    @Test
+    @DisplayName("busca do admin: texto vira LIKE minusculo e cidade e normalizada; vazio = sem filtro")
+    void searchBuildsFilters() {
+        org.springframework.data.domain.Pageable page = org.springframework.data.domain.Pageable.unpaged();
+        when(userRepository.search(any(), any(), any(), any(), any()))
+                .thenReturn(org.springframework.data.domain.Page.empty());
+
+        service.search("  Maria ", Role.MOTORISTA, null, "Remanso/BA", page);
+        verify(userRepository).search("%maria%", Role.MOTORISTA, null, "remanso-ba", page);
+
+        service.search(" ", null, UserStatus.SUSPENDED, "", page);
+        verify(userRepository).search(null, null, UserStatus.SUSPENDED, null, page);
     }
 
     @Test

@@ -23,10 +23,11 @@ public class UserStatsService {
     @Transactional(readOnly = true)
     public UserStatsSnapshot snapshot() {
         return new UserStatsSnapshot(
-                userRepository.countByRole(Role.PASSAGEIRO),
-                driverRepository.count(),
+                // Conta excluida (LGPD) nao e mais usuario: fica fora das contagens.
+                userRepository.countByRoleAndStatusNot(Role.PASSAGEIRO, UserStatus.DELETED),
+                driverRepository.countNotDeleted(),
                 driverRepository.countByOnlineTrue(),
-                driverRepository.countByApprovedFalse(),
+                driverRepository.countPendingNotDeleted(),
                 userRepository.countByStatus(UserStatus.SUSPENDED)
         );
     }
