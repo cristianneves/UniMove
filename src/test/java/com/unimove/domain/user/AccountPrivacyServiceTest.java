@@ -1,6 +1,7 @@
 package com.unimove.domain.user;
 
 import com.unimove.domain.chat.ChatPrivacyPort;
+import com.unimove.domain.notification.NotificationPrivacyPort;
 import com.unimove.domain.ride.RidePrivacyPort;
 import com.unimove.domain.user.document.DriverDocumentService;
 import com.unimove.domain.user.dto.DataExportResponse;
@@ -50,6 +51,7 @@ class AccountPrivacyServiceTest {
     @Mock UserProfileService profileService;
     @Mock RidePrivacyPort ridePrivacy;
     @Mock ChatPrivacyPort chatPrivacy;
+    @Mock NotificationPrivacyPort notificationPrivacy;
     @Mock PasswordEncoder passwordEncoder;
     @Mock ApplicationEventPublisher events;
 
@@ -60,7 +62,7 @@ class AccountPrivacyServiceTest {
     @BeforeEach
     void setUp() {
         service = new AccountPrivacyService(userRepository, driverRepository, savedPlaceRepository,
-                socialIdentityRepository, documentService, profileService, ridePrivacy, chatPrivacy,
+                socialIdentityRepository, documentService, profileService, ridePrivacy, chatPrivacy, notificationPrivacy,
                 passwordEncoder, new PrivacyProperties(TERMS, "https://x/privacidade"), events,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         user = new User();
@@ -99,6 +101,7 @@ class AccountPrivacyServiceTest {
         verify(socialIdentityRepository).deleteAll(links);
         verify(chatPrivacy).deleteSentBy(user.getId());
         verify(ridePrivacy).eraseRatingComments(user.getId());
+        verify(notificationPrivacy).deleteInboxOf(user.getId());
         verify(documentService, never()).purgeFiles(any());
         verify(events).publishEvent(new AccountAccessRevokedEvent(user.getId()));
     }

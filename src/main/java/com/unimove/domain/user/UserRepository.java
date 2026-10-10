@@ -30,6 +30,27 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     long countByRoleAndStatusNot(Role role, UserStatus status);
 
+    /** Publico de campanha: so ativo, com opt-in promocional e nunca admin (LGPD). */
+    @Query("""
+            SELECT u.id FROM User u
+            WHERE u.marketingOptIn = true
+              AND u.status = com.unimove.domain.user.UserStatus.ACTIVE
+              AND u.role <> com.unimove.domain.user.Role.ADMIN
+              AND (:cidade IS NULL OR u.cidade = :cidade)
+              AND (:role IS NULL OR u.role = :role)
+            """)
+    List<UUID> findMarketingAudience(@Param("cidade") String cidade, @Param("role") Role role);
+
+    @Query("""
+            SELECT count(u) FROM User u
+            WHERE u.marketingOptIn = true
+              AND u.status = com.unimove.domain.user.UserStatus.ACTIVE
+              AND u.role <> com.unimove.domain.user.Role.ADMIN
+              AND (:cidade IS NULL OR u.cidade = :cidade)
+              AND (:role IS NULL OR u.role = :role)
+            """)
+    long countMarketingAudience(@Param("cidade") String cidade, @Param("role") Role role);
+
     /** Busca do admin: texto em nome/e-mail/telefone + filtros opcionais. Excluidos so se pedidos por status. */
     @Query(
             value = """

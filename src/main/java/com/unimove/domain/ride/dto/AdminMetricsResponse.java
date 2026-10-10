@@ -30,7 +30,12 @@ public record AdminMetricsResponse(
             double cancellationRate
     ) {}
 
-    /** Receita reconhecida no período. */
+    /**
+     * Valor COBRADO no periodo: {@code gross} soma o preco das corridas
+     * concluidas, independente de o dinheiro ter entrado (inclui Pix simulado
+     * e dinheiro pendente/divergente). O que de fato foi recebido esta em
+     * {@link PaymentsSummary#cashConfirmed()}.
+     */
     public record RevenueSummary(
             BigDecimal gross,
             BigDecimal cancellationFees,

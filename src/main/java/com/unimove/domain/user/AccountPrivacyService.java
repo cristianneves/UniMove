@@ -1,6 +1,7 @@
 package com.unimove.domain.user;
 
 import com.unimove.domain.chat.ChatPrivacyPort;
+import com.unimove.domain.notification.NotificationPrivacyPort;
 import com.unimove.domain.ride.RidePrivacyPort;
 import com.unimove.domain.user.document.DriverDocumentService;
 import com.unimove.domain.user.dto.DataExportResponse;
@@ -45,6 +46,7 @@ public class AccountPrivacyService {
     private final UserProfileService profileService;
     private final RidePrivacyPort ridePrivacy;
     private final ChatPrivacyPort chatPrivacy;
+    private final NotificationPrivacyPort notificationPrivacy;
     private final PasswordEncoder passwordEncoder;
     private final PrivacyProperties privacy;
     private final ApplicationEventPublisher events;
@@ -58,6 +60,7 @@ public class AccountPrivacyService {
                                  UserProfileService profileService,
                                  RidePrivacyPort ridePrivacy,
                                  ChatPrivacyPort chatPrivacy,
+                                 NotificationPrivacyPort notificationPrivacy,
                                  PasswordEncoder passwordEncoder,
                                  PrivacyProperties privacy,
                                  ApplicationEventPublisher events,
@@ -70,6 +73,7 @@ public class AccountPrivacyService {
         this.profileService = profileService;
         this.ridePrivacy = ridePrivacy;
         this.chatPrivacy = chatPrivacy;
+        this.notificationPrivacy = notificationPrivacy;
         this.passwordEncoder = passwordEncoder;
         this.privacy = privacy;
         this.events = events;
@@ -150,6 +154,7 @@ public class AccountPrivacyService {
         socialIdentityRepository.deleteAll(socialIdentityRepository.findByUserId(id));
         int messages = chatPrivacy.deleteSentBy(id);
         int comments = ridePrivacy.eraseRatingComments(id);
+        notificationPrivacy.deleteInboxOf(id);
 
         Instant now = clock.instant();
         user.setEmail("deleted-" + id + "@removed.invalid");

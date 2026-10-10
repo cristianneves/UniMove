@@ -14,5 +14,6 @@ public enum AuditAction {
     PRICING_DELETED,
     CITY_OPENED,
     CITY_DEACTIVATED,
-    RIDE_CANCELLED
+    RIDE_CANCELLED,
+    CAMPAIGN_SENT
 }
