@@ -85,6 +85,7 @@ class RideServiceTest {
     @Mock ChatSseHub chatSseHub;
     @Mock RideStatusSseHub statusSseHub;
     @Mock MuralSseHub muralSseHub;
+    @Mock com.unimove.domain.audit.AdminAuditLog auditLog;
     @Spy DriverLocationPolicy driverLocationPolicy = new DriverLocationPolicy(DriverLocationProperties.defaults());
 
     @InjectMocks RideService rideService;
@@ -658,13 +659,28 @@ class RideServiceTest {
     }
 
     @Test
-    @DisplayName("motorista não pode cancelar fora de DRIVER_EN_ROUTE")
-    void motoristaCannotCancelInProgress() {
+    @DisplayName("motorista cancela corrida em andamento com motivo, sem taxa, e a posicao some")
+    void motoristaCancelsInProgressWithReason() {
+        Ride ride = rideInProgress(pax.userId(), mot.userId());
+        ride.setDriverCurrentLat(new BigDecimal("-20.8"));
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        RideResponse resp = rideService.cancel(mot, ride.getId(), new CancelRideRequest("pneu furou"));
+
+        assertThat(resp.status()).isEqualTo(RideStatus.CANCELLED);
+        assertThat(resp.cancelledBy()).isEqualTo(CancelledBy.MOTORISTA);
+        assertThat(resp.cancellationFee()).isNull();
+        assertThat(resp.driverCurrentLat()).isNull();
+    }
+
+    @Test
+    @DisplayName("motorista sem motivo nao cancela corrida em andamento")
+    void motoristaCancelInProgressRequiresReason() {
         Ride ride = rideInProgress(pax.userId(), mot.userId());
         when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
 
-        assertThatThrownBy(() -> rideService.cancel(mot, ride.getId(), new CancelRideRequest("desisti")))
-                .isInstanceOf(IllegalRideTransitionException.class);
+        assertThatThrownBy(() -> rideService.cancel(mot, ride.getId(), null))
+                .isInstanceOf(MissingCancelReasonException.class);
     }
 
     @Test
@@ -674,7 +690,92 @@ class RideServiceTest {
         when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
 
         assertThatThrownBy(() -> rideService.cancel(pax, ride.getId(), null))
+                .isInstanceOf(PassengerCannotCancelInProgressException.class);
+        assertThat(ride.getStatus()).isEqualTo(RideStatus.IN_PROGRESS);
+    }
+
+    @Test
+    @DisplayName("admin cancela corrida presa em andamento, audita e fecha o chat")
+    void adminCancelsStuckRide() {
+        Ride ride = rideInProgress(pax.userId(), mot.userId());
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+        UUID adminId = UUID.randomUUID();
+
+        RideResponse resp = rideService.cancelByAdmin(ride.getId(), adminId, " motorista sumiu ");
+
+        assertThat(resp.status()).isEqualTo(RideStatus.CANCELLED);
+        assertThat(resp.cancelledBy()).isEqualTo(CancelledBy.ADMIN);
+        assertThat(resp.cancelReason()).isEqualTo("motorista sumiu");
+        verify(auditLog).record(eq(adminId), eq(com.unimove.domain.audit.AuditAction.RIDE_CANCELLED),
+                eq("RIDE"), eq(ride.getId()), anyString());
+        verify(chatSseHub).closeRide(ride.getId());
+    }
+
+    @Test
+    @DisplayName("admin nao cancela corrida ja terminada → 409")
+    void adminCannotCancelTerminal() {
+        Ride ride = rideInProgress(pax.userId(), mot.userId());
+        ride.setStatus(RideStatus.COMPLETED);
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        assertThatThrownBy(() -> rideService.cancelByAdmin(ride.getId(), UUID.randomUUID(), "x"))
                 .isInstanceOf(IllegalRideTransitionException.class);
+        verify(auditLog, never()).record(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("create: preco recalculado diferente do visto na estimativa → 409 sem gravar")
+    void createRejectsChangedPrice() {
+        when(mapsService.route(anyList())).thenReturn(new RouteInfo(new BigDecimal("5.000"), 12, "poly"));
+        when(pricingPolicy.calculate(any(BigDecimal.class), eq(12), any(RideCategory.class), anyString()))
+                .thenReturn(new BigDecimal("18.40"));
+        CreateRideRequest req = new CreateRideRequest(new BigDecimal("-20.82"), new BigDecimal("-49.38"),
+                new BigDecimal("-20.83"), new BigDecimal("-49.39"), null, null, null, null, new BigDecimal("15.00"));
+
+        assertThatThrownBy(() -> rideService.create(pax, req))
+                .isInstanceOf(PriceChangedException.class)
+                .hasMessageContaining("18.40");
+        verify(rideRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("create: preco igual ao da estimativa segue normal")
+    void createAcceptsSamePrice() {
+        when(mapsService.route(anyList())).thenReturn(new RouteInfo(new BigDecimal("5.000"), 12, "poly"));
+        when(pricingPolicy.calculate(any(BigDecimal.class), eq(12), any(RideCategory.class), anyString()))
+                .thenReturn(new BigDecimal("18.40"));
+        when(rideRepository.save(any(Ride.class))).thenAnswer(inv -> inv.getArgument(0));
+        CreateRideRequest req = new CreateRideRequest(new BigDecimal("-20.82"), new BigDecimal("-49.38"),
+                new BigDecimal("-20.83"), new BigDecimal("-49.39"), null, null, null, null, new BigDecimal("18.4"));
+
+        assertThat(rideService.create(pax, req).preco()).isEqualByComparingTo("18.40");
+    }
+
+    @Test
+    @DisplayName("earnings separa dinheiro recebido, pendente, divergente e Pix simulado")
+    void earningsBreakdown() {
+        when(rideRepository.sumDriverEarnings(eq(mot.userId()), any(), any())).thenReturn(
+                new com.unimove.domain.ride.dto.EarningsAggregate(4, new BigDecimal("80.00"),
+                        new BigDecimal("25.00"), new BigDecimal("20.00"), 1L, new BigDecimal("30.00")));
+        when(rideRepository.findDriverEarningsByDay(eq(mot.userId()), any(), any())).thenReturn(List.of());
+
+        var resp = rideService.getDriverEarnings(mot.userId(), null, null);
+
+        assertThat(resp.grossEarnings()).isEqualByComparingTo("80.00");
+        assertThat(resp.payments().cashReceived()).isEqualByComparingTo("25.00");
+        assertThat(resp.payments().cashPending()).isEqualByComparingTo("20.00");
+        assertThat(resp.payments().cashDivergentRides()).isEqualTo(1);
+        assertThat(resp.payments().pixSimulated()).isEqualByComparingTo("30.00");
+    }
+
+    @Test
+    @DisplayName("admin lista corridas: periodo ausente vira sem limite e cidade e normalizada")
+    void adminListDefaults() {
+        rideService.listAdminRides(null, RideStatus.COMPLETED, "Remanso/BA", null, null,
+                org.springframework.data.domain.Pageable.unpaged());
+
+        verify(rideRepository).findAllForAdmin(eq(null), eq(RideStatus.COMPLETED), eq("remanso-ba"),
+                eq(Instant.EPOCH), eq(Instant.parse("9999-12-31T00:00:00Z")), any());
     }
 
     @Test

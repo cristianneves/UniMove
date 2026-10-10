@@ -318,6 +318,7 @@ class RideControllerContractTest {
         mvc.perform(get("/rides/history?status=COMPLETED&page=1&size=5"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].paymentStatus").value("CONFIRMED"))
+                .andExpect(jsonPath("$.content[0].destinoEndereco").value("Rodoviária"))
                 .andExpect(jsonPath("$.totalElements").value(6));
         mvc.perform(get("/rides/history?status=VOANDO")).andExpect(status().isBadRequest());
     }
@@ -337,6 +338,7 @@ class RideControllerContractTest {
         return new RideHistoryItem(rideId, RideStatus.COMPLETED, "remanso-ba", RideCategory.CARRO,
                 BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, new BigDecimal("2.500"), 7,
                 new BigDecimal("12.30"), null, PaymentMethod.DINHEIRO, PaymentStatus.CONFIRMED,
-                user.userId(), UUID.randomUUID(), Instant.now(), Instant.now(), null);
+                user.userId(), UUID.randomUUID(), Instant.now(), Instant.now(), null,
+                "Praça da Matriz", "Rodoviária");
     }
 }

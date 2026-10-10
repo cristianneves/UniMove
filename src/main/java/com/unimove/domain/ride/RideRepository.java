@@ -73,13 +73,24 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
                     )
                     FROM Ride r
                     WHERE (:paymentStatus IS NULL OR r.paymentStatus = :paymentStatus)
+                      AND (:status IS NULL OR r.status = :status)
+                      AND (:cidade IS NULL OR r.cidade = :cidade)
+                      AND r.createdAt >= :from AND r.createdAt < :to
                     """,
             countQuery = """
                     SELECT count(r) FROM Ride r
                     WHERE (:paymentStatus IS NULL OR r.paymentStatus = :paymentStatus)
+                      AND (:status IS NULL OR r.status = :status)
+                      AND (:cidade IS NULL OR r.cidade = :cidade)
+                      AND r.createdAt >= :from AND r.createdAt < :to
                     """
     )
-    Page<AdminRideItem> findAllForAdmin(@Param("paymentStatus") PaymentStatus paymentStatus, Pageable pageable);
+    Page<AdminRideItem> findAllForAdmin(@Param("paymentStatus") PaymentStatus paymentStatus,
+                                        @Param("status") RideStatus status,
+                                        @Param("cidade") String cidade,
+                                        @Param("from") Instant from,
+                                        @Param("to") Instant to,
+                                        Pageable pageable);
 
     /** Demanda do surge: corridas aguardando aceite no mural da cidade+categoria. */
     long countByStatusAndCidadeAndCategory(RideStatus status, String cidade, RideCategory category);
@@ -106,7 +117,8 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
                         r.latOrigem, r.lngOrigem, r.latDestino, r.lngDestino,
                         r.distanciaKm, r.tempoMin, r.preco, r.cancellationFee, r.paymentMethod, r.paymentStatus,
                         r.passageiroId, r.motoristaId,
-                        r.createdAt, r.completedAt, r.cancelledAt
+                        r.createdAt, r.completedAt, r.cancelledAt,
+                        r.origemEndereco, r.destinoEndereco
                     )
                     FROM Ride r
                     WHERE r.passageiroId = :userId
@@ -130,7 +142,8 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
                         r.latOrigem, r.lngOrigem, r.latDestino, r.lngDestino,
                         r.distanciaKm, r.tempoMin, r.preco, r.cancellationFee, r.paymentMethod, r.paymentStatus,
                         r.passageiroId, r.motoristaId,
-                        r.createdAt, r.completedAt, r.cancelledAt
+                        r.createdAt, r.completedAt, r.cancelledAt,
+                        r.origemEndereco, r.destinoEndereco
                     )
                     FROM Ride r
                     WHERE r.motoristaId = :userId
@@ -154,7 +167,8 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
                 r.latOrigem, r.lngOrigem, r.latDestino, r.lngDestino,
                 r.distanciaKm, r.tempoMin, r.preco, r.cancellationFee, r.paymentMethod, r.paymentStatus,
                 r.passageiroId, r.motoristaId,
-                r.createdAt, r.completedAt, r.cancelledAt
+                r.createdAt, r.completedAt, r.cancelledAt,
+                        r.origemEndereco, r.destinoEndereco
             )
             FROM Ride r
             WHERE r.passageiroId = :userId OR r.motoristaId = :userId
@@ -164,7 +178,15 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
 
     @Query("""
             SELECT new com.unimove.domain.ride.dto.EarningsAggregate(
-                COUNT(r), COALESCE(SUM(r.preco), 0)
+                COUNT(r), COALESCE(SUM(r.preco), 0),
+                COALESCE(SUM(CASE WHEN r.paymentStatus IN (com.unimove.domain.ride.PaymentStatus.CONFIRMED,
+                                                           com.unimove.domain.ride.PaymentStatus.DIVERGENT)
+                                  THEN r.cashReceivedAmount ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN r.paymentStatus = com.unimove.domain.ride.PaymentStatus.PENDING
+                                  THEN r.preco ELSE 0 END), 0),
+                SUM(CASE WHEN r.paymentStatus = com.unimove.domain.ride.PaymentStatus.DIVERGENT THEN 1L ELSE 0L END),
+                COALESCE(SUM(CASE WHEN r.paymentStatus = com.unimove.domain.ride.PaymentStatus.SIMULATED
+                                  THEN r.preco ELSE 0 END), 0)
             )
             FROM Ride r
             WHERE r.motoristaId = :driverId

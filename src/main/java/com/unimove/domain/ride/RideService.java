@@ -1,5 +1,7 @@
 package com.unimove.domain.ride;
 
+import com.unimove.domain.audit.AdminAuditLog;
+import com.unimove.domain.audit.AuditAction;
 import com.unimove.domain.chat.ChatSseHub;
 import com.unimove.domain.maps.GeoPoint;
 import com.unimove.domain.maps.MapsService;
@@ -37,6 +39,7 @@ import com.unimove.domain.user.UserAccountService;
 import com.unimove.domain.user.UserRatingService;
 import com.unimove.domain.user.VehicleType;
 import com.unimove.shared.security.AuthenticatedUser;
+import com.unimove.shared.util.CityNormalizer;
 import com.unimove.shared.util.Haversine;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -88,6 +91,7 @@ public class RideService {
     private final RideStatusSseHub statusSseHub;
     private final MuralSseHub muralSseHub;
     private final DriverLocationPolicy driverLocationPolicy;
+    private final AdminAuditLog auditLog;
 
     public RideService(RideRepository rideRepository,
                        RideRatingRepository rideRatingRepository,
@@ -102,7 +106,8 @@ public class RideService {
                        ChatSseHub chatSseHub,
                        RideStatusSseHub statusSseHub,
                        MuralSseHub muralSseHub,
-                       DriverLocationPolicy driverLocationPolicy) {
+                       DriverLocationPolicy driverLocationPolicy,
+                       AdminAuditLog auditLog) {
         this.rideRepository = rideRepository;
         this.rideRatingRepository = rideRatingRepository;
         this.mapsService = mapsService;
@@ -117,6 +122,7 @@ public class RideService {
         this.statusSseHub = statusSseHub;
         this.muralSseHub = muralSseHub;
         this.driverLocationPolicy = driverLocationPolicy;
+        this.auditLog = auditLog;
     }
 
     // Sem @Transactional de proposito: estimate so toca o OSRM (chamada externa)
@@ -170,6 +176,11 @@ public class RideService {
         BigDecimal surge = surgePolicy.multiplier(passageiro.cidade(), category);
         BigDecimal preco = applySurge(pricingPolicy.calculate(
                 route.distanciaKm(), route.tempoMin(), category, passageiro.cidade()), surge);
+        if (req.expectedPrice() != null && req.expectedPrice().compareTo(preco) != 0) {
+            log.info("Pedido recusado: preco mudou de {} para {} (passageiro {})",
+                    req.expectedPrice(), preco, passageiro.userId());
+            throw new PriceChangedException(req.expectedPrice(), preco);
+        }
 
         Ride ride = new Ride();
         ride.setPassageiroId(passageiro.userId());
@@ -449,12 +460,17 @@ public class RideService {
             if (!ride.getPassageiroId().equals(user.userId())) {
                 throw new RideAccessDeniedException();
             }
+            if (ride.getStatus() == RideStatus.IN_PROGRESS) {
+                throw new PassengerCannotCancelInProgressException();
+            }
             ride.setCancelledBy(CancelledBy.PASSAGEIRO);
         } else if (user.role() == Role.MOTORISTA) {
             if (!user.userId().equals(ride.getMotoristaId())) {
                 throw new RideAccessDeniedException();
             }
-            if (ride.getStatus() != RideStatus.DRIVER_EN_ROUTE) {
+            // Em andamento tambem: pane, passageiro desistiu no caminho. Sempre
+            // com motivo, sem taxa (CancellationPolicy so cobra passageiro).
+            if (ride.getStatus() != RideStatus.DRIVER_EN_ROUTE && ride.getStatus() != RideStatus.IN_PROGRESS) {
                 throw new IllegalRideTransitionException(ride.getStatus(), RideStatus.CANCELLED);
             }
             if (reason == null || reason.isBlank()) {
@@ -616,8 +632,51 @@ public class RideService {
     }
 
     @Transactional(readOnly = true)
-    public Page<AdminRideItem> listAdminRides(PaymentStatus paymentStatus, Pageable pageable) {
-        return rideRepository.findAllForAdmin(paymentStatus, pageable);
+    public Page<AdminRideItem> listAdminRides(PaymentStatus paymentStatus, RideStatus status, String cidade,
+                                              LocalDate from, LocalDate to, Pageable pageable) {
+        // Periodo sempre definido (sem IS NULL em timestamp): ausente = sem limite.
+        Instant fromInstant = from == null ? Instant.EPOCH : from.atStartOfDay(ZoneOffset.UTC).toInstant();
+        Instant toInstant = to == null
+                ? Instant.parse("9999-12-31T00:00:00Z")
+                : to.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant();
+        String city = cidade == null || cidade.isBlank() ? null : CityNormalizer.normalize(cidade);
+        return rideRepository.findAllForAdmin(paymentStatus, status, city, fromInstant, toInstant, pageable);
+    }
+
+    /** Detalhe completo para o admin investigar disputa — sem regra de participante. */
+    @Transactional(readOnly = true)
+    public RideResponse getForAdmin(UUID rideId) {
+        Ride ride = rideRepository.findById(rideId).orElseThrow(RideNotFoundException::new);
+        return RideResponse.from(ride, computeDriverDistanceKm(ride));
+    }
+
+    /**
+     * Cancelamento administrativo: destrava corrida em qualquer estado nao
+     * terminal (ex.: motorista sumiu em IN_PROGRESS). Sem taxa, com motivo e
+     * auditado na mesma transacao.
+     */
+    @Transactional
+    public RideResponse cancelByAdmin(UUID rideId, UUID adminId, String reason) {
+        Ride ride = rideRepository.findById(rideId).orElseThrow(RideNotFoundException::new);
+        RideStatus statusBefore = ride.getStatus();
+        RideStateMachine.assertCanTransition(statusBefore, RideStatus.CANCELLED);
+
+        ride.setStatus(RideStatus.CANCELLED);
+        ride.setCancelledAt(Instant.now());
+        ride.setCancelledBy(CancelledBy.ADMIN);
+        ride.setCancelReason(reason.trim());
+        ride.setCancellationFee(null);
+        clearDriverLocation(ride);
+        auditLog.record(adminId, AuditAction.RIDE_CANCELLED, "RIDE", rideId,
+                "status=" + statusBefore + " motivo=" + reason.trim());
+
+        log.warn("Ride {} cancelada pelo admin {} (estava {})", rideId, adminId, statusBefore);
+        chatSseHub.closeRide(rideId);
+        publishStatus(ride);
+        if (statusBefore == RideStatus.AVAILABLE_IN_MURAL) {
+            publishMuralRemoved(ride, MuralSseHub.REASON_CANCELLED);
+        }
+        return RideResponse.from(ride);
     }
 
     @Transactional
@@ -845,6 +904,12 @@ public class RideService {
         Instant toInstantExclusive = effectiveTo.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant();
 
         EarningsAggregate agg = rideRepository.sumDriverEarnings(driverId, fromInstant, toInstantExclusive);
+        EarningsResponse.PaymentBreakdown payments = agg == null
+                ? new EarningsResponse.PaymentBreakdown(BigDecimal.ZERO, BigDecimal.ZERO, 0, BigDecimal.ZERO)
+                : new EarningsResponse.PaymentBreakdown(
+                        orZero(agg.cashReceived()), orZero(agg.cashPending()),
+                        agg.cashDivergentRides() == null ? 0 : agg.cashDivergentRides(),
+                        orZero(agg.pixSimulated()));
         long total = agg == null ? 0L : agg.totalRides();
         BigDecimal gross = (agg == null || agg.grossEarnings() == null)
                 ? BigDecimal.ZERO
@@ -863,6 +928,10 @@ public class RideService {
                 ))
                 .toList();
 
-        return new EarningsResponse(effectiveFrom, effectiveTo, total, gross, average, byDay);
+        return new EarningsResponse(effectiveFrom, effectiveTo, total, gross, average, byDay, payments);
+    }
+
+    private static BigDecimal orZero(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value;
     }
 }

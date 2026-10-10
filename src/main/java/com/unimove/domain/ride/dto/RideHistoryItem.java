@@ -28,5 +28,7 @@ public record RideHistoryItem(
         UUID motoristaId,
         Instant createdAt,
         Instant completedAt,
-        Instant cancelledAt
+        Instant cancelledAt,
+        String origemEndereco,
+        String destinoEndereco
 ) {}
