@@ -2,12 +2,12 @@ package com.unimove.domain.user;
 
 import com.unimove.domain.city.CityCatalog;
 import com.unimove.domain.city.CityNotServedException;
-import com.unimove.domain.verification.PhoneVerificationService;
-import com.unimove.shared.event.AccountAccessRevokedEvent;
 import com.unimove.domain.user.dto.AdminResetPasswordResponse;
 import com.unimove.domain.user.dto.UpdateProfileRequest;
 import com.unimove.domain.user.dto.UpdateProfileResponse;
 import com.unimove.domain.user.dto.UserProfileResponse;
+import com.unimove.domain.verification.PhoneVerificationService;
+import com.unimove.shared.event.AccountAccessRevokedEvent;
 import com.unimove.shared.security.AuthenticatedUser;
 import com.unimove.shared.security.JwtService;
 import org.junit.jupiter.api.BeforeEach;
@@ -26,6 +26,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
@@ -244,6 +245,9 @@ class UserProfileServiceTest {
         assertThat(resp.token()).isNull();
         assertThat(resp.tokenExpiresAt()).isNull();
         verify(jwtService, never()).generate(user);
+        // Mesma cidade: sessoes existentes seguem validas.
+        assertThat(user.getTokensValidAfter()).isNull();
+        verify(events, never()).publishEvent(any(AccountAccessRevokedEvent.class));
     }
 
     @Test
@@ -262,6 +266,9 @@ class UserProfileServiceTest {
         assertThat(resp.token()).isEqualTo("novo-jwt");
         assertThat(resp.tokenExpiresAt()).isEqualTo(expires);
         assertThat(resp.profile().cidade()).isEqualTo("casa-nova");
+        // Tokens com a cidade antiga deixam de valer (outro aparelho) e os SSE caem.
+        assertThat(user.getTokensValidAfter()).isNotNull();
+        verify(events).publishEvent(new AccountAccessRevokedEvent(USER_ID));
         // Passageiro não tem linha em drivers — nada a consultar.
         verify(driverRepository, never()).findById(USER_ID);
     }

@@ -99,7 +99,7 @@ public class SecurityConfig {
                     "Troque a senha temporária antes de continuar (PUT /users/me/password).");
         } else if (blocked == AccountStatusChecker.AccountState.REVOKED) {
             writeError(res, req.getRequestURI(), HttpStatus.UNAUTHORIZED,
-                    "Sessão encerrada porque a senha foi alterada. Entre novamente.");
+                    "Sessão encerrada por alteração na conta (senha ou cidade). Entre novamente.");
         } else if (blocked == AccountStatusChecker.AccountState.GONE) {
             writeError(res, req.getRequestURI(), HttpStatus.UNAUTHORIZED,
                     "Sessão inválida: a conta não existe mais.");

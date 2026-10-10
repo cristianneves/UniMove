@@ -148,7 +148,7 @@ class SecurityWebMvcTest {
 
         mvc.perform(get("/rides/history").header("Authorization", bearer(passageiro)))
                 .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.message").value("Sessão encerrada porque a senha foi alterada. Entre novamente."));
+                .andExpect(jsonPath("$.message").value("Sessão encerrada por alteração na conta (senha ou cidade). Entre novamente."));
     }
 
     @Test
