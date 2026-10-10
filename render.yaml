@@ -84,6 +84,12 @@ services:
       - key: SUPABASE_SERVICE_KEY
         sync: false
 
+      # --- Criptografia de CPF/CNH (obrigatoria em prod: sem ela o boot falha) ---
+      # Gere com `openssl rand -base64 32` e guarde uma copia fora do Render:
+      # perder a chave torna os dados ilegiveis.
+      - key: DATA_ENCRYPTION_KEY
+        sync: false
+
       # --- Privacidade (LGPD) ---
       # sync: false pelo mesmo motivo do canal do WhatsApp: trocar a versao
       # dos termos obriga novo aceite no cadastro; e decisao de produto, operada

@@ -10,11 +10,12 @@ Card: **[RNF05][P0] Privacidade, consentimento e LGPD**. Este documento é a bas
 | Telefone (`wa_id` verificado) | todos | prova de posse do número, contato na corrida | execução de contrato | Meta (recebemos a mensagem; nada é enviado) | até a exclusão |
 | Cidade | todos | escopo de operação (mural, preço) | execução de contrato | — | mantida anonimizada (métrica) |
 | Vínculo Google (`sub`, e-mail) | quem usa login social | login sem senha | execução de contrato | Google (validação do ID Token) | até a exclusão |
-| CPF, CNH (número, categoria, validade), veículo | motorista | habilitação para operar e segurança do passageiro | obrigação legal / legítimo interesse (segurança) | — | até a exclusão |
-| Arquivos CNH, CRLV e selfie | motorista | conferência documental | idem | Supabase (storage privado, operador) | até a exclusão |
-| Origem, destino, paradas, endereços | passageiro | executar a corrida e calcular o preço | execução de contrato | motorista da corrida; OSRM/Photon (só coordenadas) | **retidos** após a exclusão (ver §3) |
+| CPF, CNH (número, categoria, validade), veículo | motorista | habilitação para operar e segurança do passageiro | obrigação legal / legítimo interesse (segurança) | — | até a exclusão. **CPF e número da CNH cifrados (AES-256-GCM)** |
+| Arquivos CNH, CRLV e selfie | motorista | conferência documental | idem | Supabase (storage privado, operador) | até a exclusão; reprovados ou substituídos: **90 dias**. Fotos regravadas sem EXIF/GPS |
+| Origem, destino, paradas, endereços | passageiro | executar a corrida e calcular o preço | execução de contrato | motorista da corrida; OSRM/Photon (só coordenadas) | **5 anos**; depois anonimizados por job diário (sem endereço, rota ou paradas; coordenadas a ~1 km) |
 | Posição do motorista | motorista | acompanhamento da corrida pelo passageiro e pelo link compartilhado | execução de contrato / segurança | passageiro da corrida; quem tem o link | **apagada ao concluir ou cancelar a corrida** |
-| Mensagens de chat | participantes | comunicação na corrida | execução de contrato | outro participante | até a exclusão de quem enviou |
+| Mensagens de chat | participantes | comunicação na corrida | execução de contrato | outro participante | até a exclusão de quem enviou ou 5 anos |
+| Caixa de entrada (notificações) | todos | avisos e campanhas (com opt-in) | consentimento (promocional) / execução de contrato | — | até a exclusão |
 | Avaliações (nota e comentário) | participantes | qualidade e segurança | legítimo interesse | — | nota retida (compõe a média do outro); comentário apagado na exclusão |
 | Pagamento em dinheiro (valor recebido, observação) | motorista | conciliação | execução de contrato / obrigação legal | — | retido com a corrida |
 | Consentimento (versão e data do aceite) | todos | prova do consentimento | obrigação legal | — | mantido |
@@ -38,7 +39,7 @@ Card: **[RNF05][P0] Privacidade, consentimento e LGPD**. Este documento é a bas
 - Bloqueada (409) com corrida em andamento.
 - **Apaga na hora:** nome, e-mail, telefone, senha, vínculo Google, locais salvos, mensagens enviadas, comentários de avaliação, opt-in, CPF/CNH/veículo e os **arquivos** de documento no storage.
 - **Retém, sem identificação:** a linha do usuário (status `DELETED`, nome "Usuário removido") e as corridas, porque outros titulares e a conciliação dependem delas (defesa em disputa, obrigação fiscal). O token atual para de valer (401) e o telefone fica livre para um novo cadastro.
-- **Pendente de decisão jurídica:** prazo de retenção das corridas (sugestão: 5 anos) e rotina de expurgo depois dele.
+- **Retenção implementada:** corridas com mais de 5 anos são anonimizadas por um job diário (`RETENTION_RIDE_YEARS`). Validar o prazo com o jurídico; ele é configurável sem deploy.
 
 ## 4. Controles de acesso
 
@@ -53,4 +54,4 @@ Card: **[RNF05][P0] Privacidade, consentimento e LGPD**. Este documento é a bas
 - [ ] Texto da política de privacidade e dos termos publicado em `PRIVACY_POLICY_URL` (jurídico/produto).
 - [ ] Avisos no app: link da política no cadastro (`GET /legal/terms`) e explicação antes de pedir permissão de GPS (Flutter).
 - [ ] Definir o encarregado (DPO) e o canal de contato do titular.
-- [ ] Prazo de retenção das corridas (§3).
+- [x] Rotina de retenção (5 anos para corridas, 90 dias para arquivos obsoletos), configurável. Falta só a validação jurídica do prazo.

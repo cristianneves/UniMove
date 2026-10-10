@@ -1,126 +1,100 @@
 # Auditoria dos cards marcados como concluídos — visão do backend
 
-**Data:** 09/10/2026
-**Base do código:** branch `feature/mvp-backend-gaps` (`6514f35`), que inclui tudo da `main` e as entregas desta sessão.
-**Escopo:** todo card do quadro *UniMove — Desenvolvimento do App* que está na lista **Concluídas** ou tem o check de concluído marcado em qualquer lista. São 32 cards. Cada um foi conferido contra o código do backend; o Flutter não entrou na análise.
+**Data:** 09/10/2026, reauditado no mesmo dia após o ciclo de correção.
+**Base do código:** branch `feature/mvp-backend-gaps` (`bc83d16`).
+**Escopo:** todo card do quadro *UniMove — Desenvolvimento do App* que está na lista **Concluídas** ou tem o check de concluído marcado em qualquer lista. São 32 cards, conferidos contra o código do backend; o Flutter não entrou na análise.
 
 ## Resumo
 
-| Situação | Qtde | Cards |
+A primeira auditoria encontrou 1 card não implementado, 3 cards que prometiam algo que o backend não fazia e 11 com lacunas. **Todas as lacunas de código foram fechadas** e validadas com 422 testes automatizados e um smoke E2E de 39 checagens contra Postgres 16 real (§6). Ficam pendentes só **ações operacionais** que dependem de acesso ao ambiente de produção (§5).
+
+| Situação inicial | Qtde | Situação agora |
 |---|---|---|
-| ❌ **Não implementado no backend** | 1 | [NOTIFICAÇÕES][P2] Campanhas administrativas |
-| ⚠️ **Card promete algo que o backend não faz** | 3 | [PERFIL] Editar dados do usuário · [ADMIN] Paginação completa das listas · [RF02/RF10] Aprovar ou reprovar documentos |
-| 🟡 **Implementado, com lacunas a registrar** | 11 | listados em §3 |
-| ✅ **Implementado sem ressalva relevante** | 17 | listados em §4 |
+| ❌ Não implementado | 1 | ✅ implementado |
+| ⚠️ Card promete algo que o backend não faz | 3 | ✅ implementado |
+| 🟡 Implementado com lacunas | 11 | ✅ lacunas fechadas (pendências só operacionais em §5) |
+| ✅ Sem ressalva | 17 | ✅ |
 
 ---
 
-## 1. ❌ Não implementado
+## 1. Antes ❌ não implementado
 
 ### [NOTIFICAÇÕES][P2] Campanhas administrativas — não homologadas
-*Lista: Preparada, com o check de concluído marcado.*
+- [x] Campanhas administrativas com caixa de entrada in-app (sem push, que está fora do MVP por decisão): `GET /admin/campaigns/audience` (prévia do público), `POST /admin/campaigns` e `GET /admin/campaigns` (histórico com destinatários, status `SENT`/`NO_AUDIENCE` e quem disparou).
+- [x] Segmentação por cidade e papel, entregue **só a contas ativas com opt-in promocional**; o envio fica auditado (`CAMPAIGN_SENT`).
+- [x] App: `GET /notifications`, `GET /notifications/unread-count`, `POST /notifications/{id}/read` (notificação de outro usuário → 404).
+- [x] A exclusão da conta apaga a caixa de entrada.
+- Fora do escopo, conforme o próprio card (item 3): integração com provedor de push.
 
-O próprio card diz "NÃO DECLARAR ENTREGUE" e mesmo assim está marcado. No backend **não existe nada** de campanhas: nem templates, segmentação, fila, histórico de disparos, endpoint de admin ou integração com provedor de push. O único item relacionado é o opt-in promocional (`PUT /users/me/preferences`), que é pré-requisito e não a entrega.
-
-- [ ] **Ação:** desmarcar o check. O card é V2/P2 condicional.
-
----
-
-## 2. ⚠️ Card promete algo que o backend não faz
+## 2. Antes ⚠️ o card prometia algo que o backend não fazia
 
 ### [PERFIL] Editar dados do usuário
-O card lista **"Alterar telefone"**. O backend **não permite** isso, por decisão de segurança: o telefone é provado pelo WhatsApp no cadastro, e deixá-lo editável anularia a verificação. O CLAUDE.md diz que a "troca de número passa pelo admin", mas **não existe endpoint de admin para trocar telefone**. Hoje a troca só é possível mexendo direto no banco.
-
-- [ ] Corrigir o texto do card (nome e cidade são editáveis; telefone não).
-- [ ] Decidir o fluxo de troca de número. Sugestão: novo desafio de WhatsApp autenticado (`POST /users/me/phone`), que mantém a prova de posse e dispensa o admin.
+- [x] `PUT /users/me/phone`: troca de telefone pelo próprio usuário, com um **novo desafio do WhatsApp** para o número novo. A posse continua provada e o admin não precisa intervir. Número de outra conta → 409.
 
 ### [ADMIN] Paginação completa das listas
-- `GET /admin/drivers/pending` devolve **lista sem paginação** (`List<PendingDriverItem>`). As outras listas de admin (`/admin/rides`, `/admin/users/suspended`, `/admin/audit`) são paginadas.
-- `GET /admin/cities` e `GET /admin/pricing` também não paginam, mas são listas pequenas por natureza, então é aceitável.
-- [ ] Paginar `/admin/drivers/pending`.
+- [x] `GET /admin/drivers/pending` agora é paginado e traz `documentationStatus`.
+- `GET /admin/cities` e `GET /admin/pricing` continuam sem paginação de propósito: são listas pequenas por natureza (cidades atendidas e combinações cidade × categoria).
 
 ### [RF02/RF10][P0] Aprovar ou reprovar documentos com justificativa
-O item 2 do card pede um **"painel de documentos pendentes"**. Hoje o admin aprova e reprova documento por motorista (`/admin/drivers/{id}/documentation`), mas **não há endpoint que liste os documentos aguardando análise** de todos os motoristas. O índice `idx_driver_documents_pending` (V27) existe, mas nenhuma query o usa. Na prática o admin precisa abrir motorista por motorista a partir de `/admin/drivers/pending`, que não mostra a situação documental.
+- [x] `GET /admin/drivers/documents/pending`: fila de análise paginada, com os mais antigos primeiro.
+- [x] `documentationStatus` em cada motorista pendente.
 
-- [ ] `GET /admin/drivers/documents/pending` (paginado): documentos `SUBMITTED` mais antigos primeiro, com motorista e tipo.
-- [ ] Incluir `documentationStatus` em `GET /admin/drivers/pending`.
+## 3. Antes 🟡 implementado com lacunas
 
----
+| Card | Lacuna | Resolução |
+|---|---|---|
+| [AUTH] Troca de senha e atualização de token | Trocar a senha não derrubava outras sessões | [x] `tokens_valid_after` (V29). O filtro JWT recusa token anterior (401), derruba os streams SSE e `PUT /users/me/password` devolve um token novo |
+| [ADMIN] Gestão de motoristas e usuários | Senha temporária não obrigava troca | [x] `must_change_password`: o login devolve `mustChangePassword` e o filtro só libera a troca de senha e o perfil. O admin do seed já nasce obrigado a trocar |
+|  | Não havia busca de usuários | [x] `GET /admin/users?q=&role=&status=&cidade=` |
+|  | Não havia troca de telefone | [x] self-service via WhatsApp (§2) |
+| [ADMIN] Métricas, preços e corridas | `/admin/rides` sem filtros nem detalhe | [x] filtros `status`, `cidade`, `from`, `to`, `paymentStatus` e `GET /admin/rides/{id}` |
+|  | Corrida presa sem saída | [x] `POST /admin/rides/{id}/cancel` (motivo obrigatório, auditado, `cancelled_by=ADMIN`, V30) |
+|  | `revenue.gross` ambíguo | [x] documentado como valor **cobrado**; o recebido fica em `payments.cashConfirmed` |
+| [MOTORISTA] Histórico, ganhos brutos e avaliação | Ganho bruto misturava o que não entrou | [x] `/drivers/me/earnings` ganha `payments` (dinheiro recebido, pendente, divergente e Pix simulado) |
+| [CORRIDA] Início, conclusão e cancelamento | `IN_PROGRESS` sem cancelamento | [x] motorista cancela com motivo e sem taxa; passageiro recebe 409 explicativo; admin cancela qualquer corrida não terminal |
+| [CORRIDAS][P1] Validar histórico | Histórico sem endereço | [x] `origemEndereco`/`destinoEndereco` no item |
+| [PASSAGEIRO][P0] Validar solicitação | Estimativa não travava o preço | [x] `POST /rides` aceita `expectedPrice`; preço diferente → 409 com o valor novo |
+| [RNF04][P0] Segurança | SSE de conta suspensa seguia aberto | [x] `AccountAccessRevokedEvent` + `UserStreamRegistry` encerram os streams após o commit (suspensão, exclusão, troca e reset de senha) |
+|  | IP do rate limit forjável | [x] primeiro IP **público** lido da direita do `X-Forwarded-For` (pula os proxies internos) |
+|  | Senha do admin do seed | [x] obrigado a trocar no 1º login (V29) e alerta no boot |
+| [RNF05][P0] Privacidade e LGPD | Sem expurgo por retenção | [x] job diário: corridas com mais de 5 anos perdem endereço, rota, paradas, posição e textos (coordenadas a ~1 km); comentários e mensagens antigas apagados; arquivos de documento reprovados ou substituídos há mais de 90 dias saem do storage |
+|  | Leitura de CPF/CNH pelo admin não auditada | [x] `DRIVER_DOCUMENTATION_VIEWED` |
+|  | Contas excluídas nas métricas | [x] fora das contagens |
+| [RF02][P0] CPF/CNH e envio de documentos | CPF/CNH em texto claro | [x] AES-256-GCM em coluna + fingerprint HMAC para unicidade (V31); `DATA_ENCRYPTION_KEY` obrigatória em prod |
+|  | Sem dígito verificador da CNH | [x] `cnhCheckDigitValid` como **sinal** para o admin. É sinal e não bloqueio porque há variantes do algoritmo e um falso negativo barraria motorista legítimo |
+|  | Sem antivírus | [x] a imagem é **decodificada e regravada** (some EXIF/GPS e carga poliglota; corrompida → 400) e PDF com JavaScript/Launch/anexo/XFA → 400. Limitação registrada: nome dentro de object stream comprimido não é inspecionado |
+| — | (achado na revalidação) CNH vencida permitia duplicar um envio em análise | [x] corrigido |
 
-## 3. 🟡 Implementado, com lacunas
+## 4. Cards já corretos na primeira auditoria
 
-### [AUTH] Troca de senha e atualização de token
-- [ ] **Trocar a senha não derruba outras sessões.** O JWT é stateless e vale 24 h: um token roubado continua válido depois da troca. O mesmo vale para o reset pelo admin. Correção barata: coluna `password_changed_at` e o filtro JWT recusando token com `iat` anterior a ela, aproveitando a consulta que já faz por request.
+[AUTH] Login e sessão · [ÉPICO][AUTH] · [INFRA] Base API · [CORRIDA] Estimativa, categorias, paradas · [CORRIDA] Aceite com GPS · [CORRIDA] Avaliação e histórico · [REALTIME] SSE + polling · [CHAT] · [MOTORISTA] Online/offline · [MAPAS] · [LOCAIS] · [ÉPICO][RF10] · [MOTORISTA][P0] Validar aceite · [ÉPICO][RF02] · [RF09] Dinheiro · [PERFIL][P1] Preferências · [RF04][P1] GPS.
 
-### [ADMIN] Gestão de motoristas e usuários
-- [ ] **A senha temporária do reset não obriga troca** no próximo login (falta um campo `mustChangePassword`). Ela é ditada por telefone ou WhatsApp e pode ficar valendo indefinidamente.
-- [ ] Não existe **busca ou listagem geral de usuários** para o admin. Só há a lista de suspensos e a de motoristas pendentes. Para suspender alguém, o admin precisa já saber o UUID.
-- [ ] Não existe endpoint de admin para **trocar telefone** (ver §2).
+## 5. Pendente — só operação (fora do código)
 
-### [ADMIN] Métricas, preços e corridas
-- [ ] `GET /admin/rides` só filtra por `paymentStatus`. Faltam filtros por **status, cidade e período**, e não há **detalhe de uma corrida** para o admin (`GET /admin/rides/{id}`), útil para investigar disputa.
-- [ ] Não existe **cancelamento administrativo** de corrida. Uma corrida presa em `IN_PROGRESS` (motorista some) só sai pelo banco.
-- [ ] `revenue.gross` em `/admin/metrics` ainda soma corrida Pix **simulada** como receita. O bloco novo `payments` separa o que foi recebido, mas o nome `gross` engana.
+- [ ] **Criar o bucket privado `driver-documents`** no Supabase de produção e configurar `SUPABASE_URL`/`SUPABASE_SERVICE_KEY` no Render. Até lá o upload responde 503.
+- [ ] **Configurar `DATA_ENCRYPTION_KEY`** no Render (`openssl rand -base64 32`) **antes** do deploy: sem ela a API não sobe em prod. Guardar a chave em local seguro, porque perdê-la torna CPF/CNH ilegíveis.
+- [ ] Após o deploy, logar como admin e trocar a senha do seed (o sistema já obriga).
+- [ ] Rodar as consultas de pré-checagem do `docs/homologacao-runbook.md` §2 antes de aplicar a V23.
 
-### [MOTORISTA] Histórico, ganhos brutos e avaliação
-- [ ] `GET /drivers/me/earnings` soma o `preco` de **toda corrida concluída**, inclusive Pix simulado e dinheiro `DIVERGENT` ou `PENDING`. "Ganho bruto" fica acima do que o motorista recebeu. Falta separar por `paymentStatus` (confirmado × pendente × divergente).
+## 6. Como foi validado
 
-### [CORRIDA] Início, conclusão e cancelamento
-- [ ] Corrida em `IN_PROGRESS` **não pode ser cancelada por ninguém**: a máquina de estados só permite `COMPLETED`. Em emergência (pane, passageiro desiste no meio), o motorista é obrigado a "concluir". Decidir a regra: cancelamento em andamento com motivo, ou cancelamento pelo admin.
-
-### [CORRIDAS][P1] Validar histórico; recibo depende de pagamento
-- [ ] `RideHistoryItem` **não traz `origemEndereco`/`destinoEndereco`** (só coordenadas), embora a corrida tenha esses campos. A tela de histórico fica sem endereço legível ou precisa chamar o reverse geocoding para cada item.
-- Recibo: fora do escopo, como o próprio card registra.
-
-### [PASSAGEIRO][P0] Validar solicitação e estimativa existentes
-- [ ] **A estimativa não trava o preço.** `POST /rides` recalcula a rota e o surge. Se o surge mudar entre a tela de estimativa e o pedido, o preço salvo difere do exibido sem aviso. Opções: devolver o `preco` no `POST /rides` e exigir confirmação quando divergir, ou um `quoteId` com validade curta.
-
-### [RNF04][P0] Segurança: remover demo de produção e proteger acesso
-- [ ] Stream SSE já aberto de conta suspensa continua até expirar (30 min). Os requests novos já são barrados.
-- [ ] O rate limit usa o 1º IP do `X-Forwarded-For`, que o cliente pode falsificar. Usar o IP adicionado pelo proxy do Render.
-- [ ] A rotação da senha do admin do seed é operacional e ainda não foi feita (o boot alerta).
-
-### [RNF05][P0] Privacidade, consentimento e LGPD
-- [ ] Não há **rotina de expurgo por retenção**: corridas e documentos reprovados ficam para sempre. Depende do prazo jurídico (ver `docs/lgpd-inventario-dados.md` §3).
-- [ ] O acesso de admin a **dado pessoal fora dos documentos** (ex.: `GET /admin/drivers/{id}/documentation`, que mostra CPF e CNH) não é auditado; só a URL do arquivo é.
-- [ ] Contas `DELETED` continuam entrando nas contagens de usuários do `/admin/metrics`.
-
-### [RF02][P0] Cadastro de CPF, CNH e veículo completo / [RF02][P0] Envio privado de CNH, CRLV e selfie
-- [ ] O número da CNH só é validado no formato (11 dígitos), **sem dígito verificador**.
-- [ ] CPF e CNH ficam **em texto claro** no banco. É aceitável no MVP com acesso restrito, mas vale avaliar criptografia em coluna.
-- [ ] Os arquivos são checados por *magic bytes*, sem **antivírus**.
-- [ ] O bucket privado **ainda não foi criado** no Supabase de produção. Até lá o upload responde 503.
-
----
-
-## 4. ✅ Implementados sem ressalva relevante (backend)
-
-| Card | Evidência |
-|---|---|
-| [AUTH] Login e sessão implementados — cadastro real pendente | `/auth/login`, JWT, lockout; o cadastro exige `verificationToken` e cidade de `/cities` |
-| [ÉPICO][AUTH] Autenticação: pendências e integração (não duplicar) | login, cadastro, social, troca e reset de senha. A recuperação self-service é outro card ([RF01][P1], aberto) |
-| [INFRA] Base API, PostgreSQL, SSE e mapas existente | V1–V28 aplicadas num Postgres real, `validate` ok. Ressalva de operação: o Render free hiberna e para os `@Scheduled` |
-| [CORRIDA] Estimativa, categorias, paradas e seleção de método | `/rides/estimate` com opções por categoria, até 5 paradas, `confirm-payment` |
-| [CORRIDA] Aceite com posição GPS real | `AcceptRideRequest {lat,lng}`, ETA de chegada |
-| [CORRIDA] Avaliação e histórico paginado | `/rides/{id}/rating` único por participante; `/rides/history` paginado e filtrável |
-| [REALTIME] SSE + sincronização periódica | três hubs SSE com snapshot na reconexão e heartbeat de 15 s; `GET /rides/{id}` para polling. Escala só em instância única (RNF08) |
-| [CHAT] Chat durante corrida | só participantes, só em `DRIVER_EN_ROUTE`/`IN_PROGRESS`, `Last-Event-ID` |
-| [MOTORISTA] Online/offline e corridas disponíveis | online exige aprovação e CNH válida; mural por cidade e categoria; auto-offline |
-| [MAPAS] Busca e geocodificação reversa | `/maps/geocode` e `/maps/reverse` (Photon) com cache e rate limit |
-| [LOCAIS] Destinos recentes e locais salvos | `/rides/recent-destinations`, `/saved-places` |
-| [ÉPICO][RF10][P1] Administração: cidades, documentos e auditoria | admin de cidades, revisão documental, `admin_audit_log` |
-| [MOTORISTA][P0] Validar aceite, cancelamento e GPS existente | `@Version` + índice único de motorista ativo; cancelamento com motivo; GPS validado |
-| [ÉPICO][RF02][P0] Cadastro documental do motorista — coordenação | ressalvas nos cards filhos (§2 e §3) |
-| [RF09][P0] Pagamento em dinheiro com registro operacional | `changeFor`, `cash-payment`, `DIVERGENT`, filtro de conciliação. Ressalva no extrato do motorista (§3) |
-| [PERFIL][P1] Preferências e ajuda — escopo isolado | `/users/me/preferences`, exclusão de conta. "Ajuda" é UI |
-| [RF04][P1] GPS durante corrida/background: validar e complementar | timestamp, precisão, posição velha, salto e fora de ordem; limpeza ao encerrar. O envio em background é do app |
-
-> Para as verificações, ver `docs/homologacao-runbook.md` §7: smoke E2E contra Postgres real e 368 testes automatizados.
-
----
-
-## 5. Prioridade sugerida para fechar as lacunas
-
-1. **P0 / piloto:** desmarcar [NOTIFICAÇÕES]; derrubar sessões na troca ou reset de senha e forçar troca da temporária; cancelamento de corrida em andamento (motorista com motivo, ou admin); criar o bucket de documentos.
-2. **P1:** fila de documentos pendentes e paginação de `/admin/drivers/pending`; ganhos do motorista por `paymentStatus`; endereços no histórico; filtros e detalhe em `/admin/rides`; busca de usuários no admin.
-3. **P2:** troca de telefone por novo desafio; preço travado pela estimativa; dígito verificador da CNH; expurgo por retenção; IP confiável no rate limit.
+- **Testes:** 422 automatizados, 0 falhas.
+- **Smoke E2E contra Postgres 16 real**, com a API subindo do zero (migrations V1–V32 aplicadas, Hibernate `validate`, queries JPQL e nativas aceitas). Foram **39/39 checagens**:
+  - senha temporária e revogação de sessão;
+  - CPF cifrado no banco e unicidade pelo hash;
+  - fila de documentos e auditoria de leitura;
+  - busca de usuários;
+  - preço travado;
+  - cancelamentos do motorista e do admin;
+  - filtros e detalhe de corridas;
+  - extrato por pagamento e histórico com endereço;
+  - troca de telefone;
+  - campanhas e caixa de entrada;
+  - **SSE derrubado na suspensão**;
+  - **retenção real** (corrida de 6 anos anonimizada, recente intacta);
+  - exclusão limpando a caixa;
+  - rate limit resistente a `X-Forwarded-For` forjado.
+- **Log:** sem nenhum 500 nem ERROR inesperado.
+- **Bugs que só a validação real pegou, ambos corrigidos com teste de regressão:**
+  - o boot falhava pelo construtor duplicado da `FieldCrypto`;
+  - aparecia um ERROR no fim do SSE de conta revogada.

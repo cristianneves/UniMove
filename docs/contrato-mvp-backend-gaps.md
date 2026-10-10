@@ -51,3 +51,47 @@ Admin: `GET /admin/drivers/{id}/documentation`, `GET .../documents/{docId}/file`
 
 - Enum ou UUID inválido no path ou na query (ex.: `?status=FOO`) → **400**.
 - Parte multipart ausente → **400**. Arquivo acima do teto → **413**.
+
+---
+
+## 7. Segundo ciclo (auditoria dos cards concluídos)
+
+### ⚠️ Mais mudanças que quebram o app
+
+4. **`PUT /users/me/password` devolve 200 com `AuthResponse`** (era 204 sem corpo). A troca **revoga todos os tokens anteriores**: o app precisa substituir o JWT pelo `token` da resposta e reabrir os streams SSE.
+5. **`AuthResponse` ganha `mustChangePassword`.** Com `true` (senha temporária do reset), a API só aceita `PUT /users/me/password` e `GET /users/me`; o resto volta 403 *"Troque a senha temporária..."*. O app deve abrir a tela de troca.
+6. **Novo 401 `"Sessão encerrada porque a senha foi alterada. Entre novamente."`**: aparece em token emitido antes de uma troca ou reset. O app deve voltar ao login.
+7. **`GET /admin/drivers/pending` virou paginado** (`Page`: `content`, `totalElements`...) e cada item traz `documentationStatus`.
+
+### Corrida
+- `POST /rides` aceita `expectedPrice` (o `preco` mostrado na estimativa). Se o valor recalculado for diferente → **409** com o preço novo na mensagem; o app mostra e pede confirmação.
+- **Motorista pode cancelar em `IN_PROGRESS`**, sempre com `reason` e sem taxa. Passageiro em `IN_PROGRESS` recebe 409 explicativo.
+- `cancelledBy` pode vir `ADMIN`.
+- Histórico (`/rides/history`) traz `origemEndereco` e `destinoEndereco`.
+- `/drivers/me/earnings` ganha `payments`: `cashReceived`, `cashPending`, `cashDivergentRides`, `pixSimulated`.
+
+### Perfil
+- `PUT /users/me/phone {"verificationToken": "..."}`: troca de número. Faça antes o desafio do WhatsApp com o número novo. 409 se o número é de outra conta.
+
+### Notificações (in-app, sem push)
+| Rota | Uso |
+|---|---|
+| `GET /notifications` | caixa de entrada paginada (`kind`: `PROMOTIONAL`/`TRANSACTIONAL`) |
+| `GET /notifications/unread-count` | `{"unread": n}` para o badge |
+| `POST /notifications/{id}/read` | marca como lida (204, idempotente) |
+
+### Admin
+| Rota | Uso |
+|---|---|
+| `GET /admin/users?q=&role=&status=&cidade=` | busca de usuários |
+| `GET /admin/drivers/documents/pending` | fila de documentos aguardando análise |
+| `GET /admin/rides?status=&cidade=&from=&to=&paymentStatus=` | filtros (datas ISO `yyyy-MM-dd`) |
+| `GET /admin/rides/{id}` | detalhe da corrida |
+| `POST /admin/rides/{id}/cancel {"reason":"..."}` | cancela corrida não terminal (auditado) |
+| `GET /admin/campaigns/audience?cidade=&role=` | prévia: quantos receberiam |
+| `POST /admin/campaigns {"title","body","cidade"?,"role"?}` | envia campanha (só para quem tem opt-in) |
+| `GET /admin/campaigns` | histórico |
+
+### Documentos do motorista
+- `profile.cnhCheckDigitValid` (admin e motorista): sinal do dígito verificador da CNH. Não bloqueia.
+- **Upload:** a foto é regravada no servidor, então o EXIF e a localização GPS da foto não são guardados. Imagem corrompida → 400; PDF com script ou anexo → 400.

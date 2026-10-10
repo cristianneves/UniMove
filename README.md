@@ -67,6 +67,7 @@ com.unimove
 │   └── document      Cadastro documental do motorista (CPF/CNH/veiculo +        [implementado]
 │                     CNH/CRLV/selfie em bucket privado do Supabase Storage)
 ├── domain.audit      Trilha de auditoria das acoes administrativas              [implementado]
+├── domain.notification  Caixa de entrada in-app + campanhas admin (sem push)    [implementado]
 ├── domain.maps       Gateway OSRM (rotas + geometria/polyline) + cache de rotas,  [implementado]
 │                     gateway Photon (geocoding: busca de endereço + pin no mapa)
 ├── domain.ride       Mural, maquina de estados, tarifa dinamica (pricing_configs), [implementado]
@@ -125,6 +126,8 @@ com.unimove
 | `SUPABASE_URL`        | —                                  | nao — sem ele o upload de documentos do motorista responde 503 |
 | `SUPABASE_SERVICE_KEY` | —                                 | junto com `SUPABASE_URL` (chave **service_role**, so no backend) |
 | `SUPABASE_DOCUMENTS_BUCKET` | `driver-documents`           | nao — bucket **privado** |
+| `DATA_ENCRYPTION_KEY` | —                                  | **sim em prod** — 32 bytes base64 (`openssl rand -base64 32`); cifra CPF/CNH. Sem ela o boot de prod falha; perder a chave torna os dados ilegiveis |
+| `RETENTION_ENABLED` / `RETENTION_RIDE_YEARS` / `RETENTION_REJECTED_DOCUMENT_DAYS` | `true` / `5` / `90` | nao — expurgo LGPD diario (03:30 BRT) |
 | `PRIVACY_TERMS_VERSION` | `2026-10`                        | nao — versao vigente dos termos; trocar exige novo aceite |
 | `PRIVACY_POLICY_URL`  | `https://unimove.app/privacidade`  | nao — link exibido no cadastro |
 | `RATE_LIMIT_AUTH_MAX` / `RATE_LIMIT_AUTH_WINDOW_MINUTES` | `30` / `10` | nao — login/cadastro/social por IP |
@@ -153,7 +156,7 @@ Veja `.env.example` para o template completo.
 Push na `main` dispara o pipeline em [`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml):
 
 ```
-[test]   mvn -B verify (368 testes, ~1min, sem Docker/Postgres)
+[test]   mvn -B verify (422 testes, ~1min, sem Docker/Postgres)
 [build]  buildx --platform linux/amd64 -> ghcr.io/cristianneves/unimove:<sha> + :latest
 [deploy] deploy hook do Render com imgURL=<sha>, depois espera /actuator/health
 ```
@@ -196,7 +199,7 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 | Bloco                       | Status        | Observacoes |
 |-----------------------------|---------------|-------------|
 | Scaffold (pom, profiles)    | concluido     | Spring Boot 3.3.5 + Java 21 |
-| Schema (`V1`-`V28`)         | concluido     | V23–V28: corrida ativa unica no banco, precisao do GPS, pagamento em dinheiro, auditoria admin, documentos do motorista, consentimento/exclusao (LGPD). |
+| Schema (`V1`-`V32`)         | concluido     | V29 revogacao de sessao/senha temporaria, V30 cancelamento admin, V31 CPF/CNH cifrados, V32 notificacoes. V23–V28: corrida ativa unica no banco, precisao do GPS, pagamento em dinheiro, auditoria admin, documentos do motorista, consentimento/exclusao (LGPD). |
 | Schema ate `V22`            | concluido     | served_cities, users (com `status`, `phone_verified_at`, telefone unico e `password_hash` nullable p/ conta social), social_identities, phone_verifications, drivers, rides (com `@Version`, `share_token`, `route_geometry` e `surge_multiplier`), route_cache (com `geometry`), ride_ratings, saved_places, cancellation_fee, category, pricing_configs (com `surge_enabled`/`surge_cap`), chat_messages, ride_stops, geocode_cache |
 | `shared` (security, JWT, exception handler) | concluido | `GlobalExceptionHandler` cobre validacao, JSON ilegivel/enum invalido (400), lock otimista, `BusinessException` |
 | `domain.user`               | concluido     | `/auth/*`, online/offline, admin approve, `/saved-places`, denormalizacao de rating, **suspensao/reativacao via `/admin/users/*`** |
@@ -221,6 +224,10 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 | Pagamento em dinheiro       | concluido     | `changeFor` (troco) no `confirm-payment`; `POST /rides/{id}/cash-payment` (motorista registra o recebido; abaixo do preco = `DIVERGENT` com observacao); `paymentStatus` em corrida/historico/mural/admin; filtro `/admin/rides?paymentStatus=`; bloco `payments` em `/admin/metrics`. Pix segue `SIMULATED` — nunca conta como recebido |
 | Cadastro documental (RF02)  | concluido     | `/drivers/me/documentation/*` (CPF/CNH/veiculo + upload CNH/CRLV/selfie) e `/admin/drivers/{id}/documentation|documents/*` (URL assinada auditada, aprovar, reprovar com motivo). `approve` exige documentacao aprovada; online/aceite exige CNH valida. Ver `docs/homologacao-runbook.md` para o bucket |
 | Auditoria admin             | concluido     | `admin_audit_log` (V26) gravado na mesma transacao da acao; `GET /admin/audit?action=&targetId=` |
+| Sessoes e senha             | concluido     | Troca/reset de senha revoga tokens antigos (401) e derruba streams SSE; senha temporaria obriga troca (`mustChangePassword`); admin do seed forcado a trocar |
+| Admin operacional           | concluido     | Busca de usuarios, fila de documentos pendentes, `/admin/rides` com filtros e detalhe, cancelamento administrativo de corrida |
+| Notificacoes / campanhas    | concluido     | `domain.notification`: campanhas so para quem deu opt-in, segmentadas por cidade/papel, com previa, historico e auditoria; caixa de entrada `GET /notifications` |
+| Retencao LGPD               | concluido     | Job diario anonimiza corridas > 5 anos e apaga arquivos de documento obsoletos > 90 dias |
 | Privacidade (LGPD)          | concluido     | `GET /legal/terms`, `termsVersion` obrigatorio no cadastro, `POST /users/me/terms`, `GET/PUT /users/me/preferences` (opt-in promocional), `GET /users/me/data-export`, `DELETE /users/me` (anonimizacao imediata). Ver `docs/lgpd-inventario-dados.md` |
 | Share publico da viagem     | concluido     | `share_token` em toda ride; `GET /share/{token}` publico, 410 ao terminar |
 | Cidades atendidas (whitelist) | concluido   | `served_cities` + `CityCatalog`. `cidade` deixou de ser texto livre: cadastro (comum e social) e `PUT /users/me` so aceitam cidade da lista (400 `"Ainda nao atendemos esta cidade."`). `GET /cities` publico alimenta o seletor do app; ADMIN abre/fecha em runtime por `POST`/`DELETE /admin/cities`, sem deploy. Desativar e **soft**: quem ja opera na cidade continua, ela so some das escolhas novas. Motorista que troca de cidade e derrubado para offline |
@@ -237,7 +244,7 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 
 ### Testes
 
-Cobertura atual (`mvn test`) — 38 classes, **368 testes**. Novas nesta versao:
+Cobertura atual (`mvn test`) — **422 testes**. Segundo ciclo: `NotificationServiceTest`, `FieldCryptoTest`, `FieldCryptoSpringWiringTest`, `CnhTest`, `UserStreamRegistryTest`, `ClientIpTest`, `RideRetentionSchedulerTest`, `DocumentRetentionSchedulerTest`, `AdminRideControllerWebMvcTest` e casos novos nos testes de servico. Primeiro ciclo:
 
 - `SecurityWebMvcTest` — cadeia de seguranca real: 401 sem/token adulterado, 403 por role, conta suspensa (403) e excluida (401) com token ainda valido, rota publica com token bloqueado, acesso cruzado (BOLA)
 - `RateLimitFilterTest`, `UserAccountServiceTest`, `DriverServiceTest`, `AdminAuditServiceTest`
@@ -269,6 +276,6 @@ Ja existentes:
 - `UserProfileServiceTest` — edição de perfil, troca de senha, re-emissão de JWT ao mudar cidade, cidade fora da whitelist não altera nada, motorista derrubado para offline ao trocar de cidade (e mantido online quando só o nome muda), conta só-social sem senha (409 explicativo) e reset pelo admin que a converte em dual
 - `AdminMetricsServiceTest` (Mockito) — painel admin: derivação de `active`/taxas/ticket médio, defaulting do período (últimos 30 dias), range invertido → 400, agregado nulo → zeros
 
-Total: **368 testes** passando em segundos (JUnit 5 + Mockito, sem Docker/Postgres). As migrations V1–V28, o `ddl-auto=validate` e as queries JPQL foram validados subindo a API num Postgres 16 real, com smoke E2E ponta a ponta (ver `docs/homologacao-runbook.md`).
+Total: **422 testes** passando em segundos (JUnit 5 + Mockito, sem Docker/Postgres). As migrations V1–V28, o `ddl-auto=validate` e as queries JPQL foram validados subindo a API num Postgres 16 real, com smoke E2E ponta a ponta (ver `docs/homologacao-runbook.md`).
 
 > **Lock otimista:** não é exercitado em unit test (depende do `@Version` do Hibernate em runtime). A garantia vem do schema (`rides.version`) + tradução de `ObjectOptimisticLockingFailureException` para HTTP 409 no `GlobalExceptionHandler`. Valide manualmente via `docs/smoke-test.md` seção 5 (aceite por dois motoristas).

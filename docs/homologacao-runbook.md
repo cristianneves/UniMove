@@ -50,17 +50,25 @@ Se alguma consulta retornar linhas, resolva cada caso **manualmente**: cancele a
 3. Configure no Render: `SUPABASE_URL=https://<ref>.supabase.co` e `SUPABASE_SERVICE_KEY=<service_role>`. **Nunca** coloque essa chave no app.
 4. Sem essas variáveis o upload responde **503** e o resto da API funciona normalmente.
 
+## 4.1 Chave de criptografia (V31)
+
+CPF e número da CNH ficam cifrados (AES-256-GCM). Antes do deploy:
+
+1. Gere a chave com `openssl rand -base64 32` e configure `DATA_ENCRYPTION_KEY` no Render. **Sem ela a API não sobe em prod.**
+2. Guarde uma cópia da chave fora do Render (cofre de senhas). **Perdê-la torna CPF/CNH ilegíveis**, e trocá-la exige recifrar os dados.
+
 ## 5. Variáveis novas
 
 | Variável | Para quê |
 |---|---|
 | `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` | upload e leitura dos documentos |
 | `PRIVACY_TERMS_VERSION`, `PRIVACY_POLICY_URL` | versão e link da política exigidos no cadastro |
-| `RATE_LIMIT_*`, `DRIVER_LOCATION_*` | opcionais; os defaults servem para o piloto |
+| `DATA_ENCRYPTION_KEY` | **obrigatória em prod**: cifra CPF/CNH |
+| `RATE_LIMIT_*`, `DRIVER_LOCATION_*`, `RETENTION_*` | opcionais; os defaults servem para o piloto |
 
 ## 6. Segurança operacional
 
-- No boot a API registra um `ERROR SEGURANCA` se algum admin ainda usa a senha do seed (`V2`). **Troque já:** faça login como admin e chame `PUT /users/me/password`. A senha antiga está escrita no arquivo da migration, que não pode ser editado (o Flyway valida o checksum).
+- O admin do seed que ainda usa a senha publicada na V2 **é obrigado a trocá-la no primeiro login** (V29): até trocar, só `PUT /users/me/password` funciona. Enquanto isso, o boot também registra um `ERROR SEGURANCA`. A senha antiga está escrita no arquivo da migration, que não pode ser editado (o Flyway valida o checksum).
 - Conta suspensa perde o acesso **na hora**: o filtro JWT consulta o status a cada request.
 
 ## 7. Smoke autenticado (validado em 09/10/2026)
@@ -80,6 +88,10 @@ Executado contra Postgres 16 limpo, com a API subindo do zero:
 - [x] Nenhum 500 no log
 
 O roteiro pode ser repetido com `docs/api.http` seguindo a mesma ordem.
+
+## 7.1 Smoke do segundo ciclo (09/10/2026): 39/39
+
+Postgres 16 limpo, V1–V32: senha temporária e revogação de sessão; CPF cifrado (`v1:`) com unicidade pelo hash; fila de documentos; auditoria da leitura de CPF/CNH; busca de usuários; preço travado (409); cancelamento em andamento (motorista e admin); filtros e detalhe de corridas; extrato por pagamento; histórico com endereço; troca de telefone; campanhas e caixa de entrada; **SSE encerrado na suspensão**; **retenção** (corrida de 6 anos anonimizada, recente intacta); exclusão limpando a caixa; rate limit com `X-Forwarded-For` forjado. Nenhum 500 no log.
 
 ## 8. Pendente (infra, fora do código)
 
