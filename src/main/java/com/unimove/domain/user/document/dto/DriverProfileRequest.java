@@ -1,6 +1,7 @@
 package com.unimove.domain.user.document.dto;
 
 import com.unimove.shared.util.Cpf;
+import com.unimove.shared.util.VehiclePlate;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -25,7 +26,7 @@ public record DriverProfileRequest(
         @NotNull @Min(1990) @Max(2100) Integer vehicleYear,
         @NotBlank @Size(max = 30) String vehicleColor,
         @NotBlank
-        @Pattern(regexp = "[A-Za-z]{3}-?\\d[A-Za-z0-9]\\d{2}", message = "Placa inválida (ABC1234 ou ABC1D23).")
+        @Pattern(regexp = VehiclePlate.PATTERN, message = VehiclePlate.MESSAGE)
         String vehiclePlate
 ) {
     @AssertTrue(message = "CPF inválido.")

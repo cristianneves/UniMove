@@ -7,12 +7,13 @@ import com.unimove.domain.user.DriverNotFoundException;
 import com.unimove.domain.user.DriverRepository;
 import com.unimove.domain.user.VehicleType;
 import com.unimove.domain.user.document.dto.DocumentFileUrlResponse;
-import com.unimove.domain.user.document.dto.PendingDocumentItem;
 import com.unimove.domain.user.document.dto.DriverDocumentItem;
 import com.unimove.domain.user.document.dto.DriverDocumentationResponse;
 import com.unimove.domain.user.document.dto.DriverProfileRequest;
+import com.unimove.domain.user.document.dto.PendingDocumentItem;
 import com.unimove.shared.security.FieldCrypto;
 import com.unimove.shared.util.Cpf;
+import com.unimove.shared.util.VehiclePlate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -146,7 +147,7 @@ public class DriverDocumentService {
         }
 
         String cpf = Cpf.digits(req.cpf());
-        String plate = req.vehiclePlate().replace("-", "").toUpperCase();
+        String plate = VehiclePlate.normalize(req.vehiclePlate());
         validateProfile(driver.getVehicleType(), req, today);
         String cpfHash = crypto.fingerprint(cpf);
         String cnhHash = crypto.fingerprint(req.cnhNumber());

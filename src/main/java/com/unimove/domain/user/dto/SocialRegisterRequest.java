@@ -3,9 +3,11 @@ package com.unimove.domain.user.dto;
 import com.unimove.domain.user.Role;
 import com.unimove.domain.user.VehicleType;
 import com.unimove.domain.user.social.SocialProvider;
+import com.unimove.shared.util.VehiclePlate;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 /**
@@ -27,7 +29,7 @@ public record SocialRegisterRequest(
         @NotNull Role role,
         @NotBlank @Size(max = 80) String cidade,
         VehicleType vehicleType,
-        @Size(max = 10) String vehiclePlate,
+        @Pattern(regexp = VehiclePlate.PATTERN, message = VehiclePlate.MESSAGE) String vehiclePlate,
         /** Versao dos termos/politica aceita na tela de cadastro (GET /legal/terms). */
         @NotBlank @Size(max = 20) String termsVersion
 ) {

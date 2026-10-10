@@ -130,7 +130,7 @@ class AuthServiceRegisterTest {
         when(jwtService.generate(any()))
                 .thenReturn(new JwtService.IssuedToken("jwt", Instant.now().plusSeconds(3600)));
 
-        service.register(request(Role.MOTORISTA, VehicleType.MOTO, " abc1d23 "));
+        service.register(request(Role.MOTORISTA, VehicleType.MOTO, " abc-1d23 "));
 
         ArgumentCaptor<Driver> captor = ArgumentCaptor.forClass(Driver.class);
         verify(driverRepository).save(captor.capture());

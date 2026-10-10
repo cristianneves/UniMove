@@ -7,6 +7,7 @@ import com.unimove.domain.user.dto.RegisterRequest;
 import com.unimove.domain.verification.PhoneVerificationService;
 import com.unimove.shared.security.JwtService;
 import com.unimove.shared.util.CityNormalizer;
+import com.unimove.shared.util.VehiclePlate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -100,7 +101,7 @@ public class AuthService {
             driver.setApproved(false);
             driver.setOnline(false);
             driver.setVehicleType(req.vehicleType());
-            driver.setVehiclePlate(req.vehiclePlate().trim().toUpperCase());
+            driver.setVehiclePlate(VehiclePlate.normalize(req.vehiclePlate()));
             driverRepository.save(driver);
         }
 
