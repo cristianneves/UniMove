@@ -34,6 +34,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -83,6 +84,7 @@ class RideServiceTest {
     @Mock ChatSseHub chatSseHub;
     @Mock RideStatusSseHub statusSseHub;
     @Mock MuralSseHub muralSseHub;
+    @Spy DriverLocationPolicy driverLocationPolicy = new DriverLocationPolicy(DriverLocationProperties.defaults());
 
     @InjectMocks RideService rideService;
 
@@ -995,6 +997,68 @@ class RideServiceTest {
         assertThatThrownBy(() -> rideService.subscribeStatus(outroPax, ride.getId()))
                 .isInstanceOf(RideAccessDeniedException.class);
         verify(statusSseHub, never()).register(any());
+    }
+
+    // ------------------------------------------------------------------------
+    // GPS: ordem, precisao e minimizacao
+    // ------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("driver-location: posicao com recordedAt anterior a atual e ignorada (rede fora de ordem)")
+    void outOfOrderLocationIsIgnored() {
+        Ride ride = rideEnRoute(pax.userId(), mot.userId());
+        Instant current = Instant.now().minusSeconds(5);
+        ride.setDriverCurrentLat(new BigDecimal("-20.82100"));
+        ride.setDriverCurrentLng(new BigDecimal("-49.37900"));
+        ride.setDriverLocationUpdatedAt(current);
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        RideResponse resp = rideService.updateDriverLocation(mot, ride.getId(), new UpdateDriverLocationRequest(
+                new BigDecimal("-20.82200"), new BigDecimal("-49.38000"), current.minusSeconds(10), null));
+
+        assertThat(resp.driverCurrentLat()).isEqualByComparingTo("-20.82100");
+        assertThat(ride.getDriverLocationUpdatedAt()).isEqualTo(current);
+    }
+
+    @Test
+    @DisplayName("driver-location: grava o instante do GPS e a precisao reportada")
+    void acceptedLocationStoresFixTimeAndAccuracy() {
+        Ride ride = rideEnRoute(pax.userId(), mot.userId());
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+        Instant fix = Instant.now().minusSeconds(3);
+
+        rideService.updateDriverLocation(mot, ride.getId(), new UpdateDriverLocationRequest(
+                new BigDecimal("-20.82100"), new BigDecimal("-49.37900"), fix, new BigDecimal("12.5")));
+
+        assertThat(ride.getDriverLocationUpdatedAt()).isEqualTo(fix);
+        assertThat(ride.getDriverLocationAccuracyM()).isEqualByComparingTo("12.5");
+    }
+
+    @Test
+    @DisplayName("driver-location: precisao ruim → InvalidDriverLocationException, posicao intacta")
+    void inaccurateLocationIsRejected() {
+        Ride ride = rideEnRoute(pax.userId(), mot.userId());
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        assertThatThrownBy(() -> rideService.updateDriverLocation(mot, ride.getId(), new UpdateDriverLocationRequest(
+                new BigDecimal("-20.82100"), new BigDecimal("-49.37900"), null, new BigDecimal("500"))))
+                .isInstanceOf(InvalidDriverLocationException.class);
+        assertThat(ride.getDriverCurrentLat()).isNull();
+    }
+
+    @Test
+    @DisplayName("complete: apaga a posicao do motorista (minimizacao LGPD)")
+    void completeClearsDriverLocation() {
+        Ride ride = rideInProgress(pax.userId(), mot.userId());
+        ride.setDriverCurrentLat(new BigDecimal("-20.82100"));
+        ride.setDriverCurrentLng(new BigDecimal("-49.37900"));
+        ride.setDriverLocationUpdatedAt(Instant.now());
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        RideResponse resp = rideService.complete(mot, ride.getId());
+
+        assertThat(resp.driverCurrentLat()).isNull();
+        assertThat(ride.getDriverLocationUpdatedAt()).isNull();
     }
 
     // ------------------------------------------------------------------------

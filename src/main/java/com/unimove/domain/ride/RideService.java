@@ -86,6 +86,7 @@ public class RideService {
     private final ChatSseHub chatSseHub;
     private final RideStatusSseHub statusSseHub;
     private final MuralSseHub muralSseHub;
+    private final DriverLocationPolicy driverLocationPolicy;
 
     public RideService(RideRepository rideRepository,
                        RideRatingRepository rideRatingRepository,
@@ -99,7 +100,8 @@ public class RideService {
                        UserAccountService userAccountService,
                        ChatSseHub chatSseHub,
                        RideStatusSseHub statusSseHub,
-                       MuralSseHub muralSseHub) {
+                       MuralSseHub muralSseHub,
+                       DriverLocationPolicy driverLocationPolicy) {
         this.rideRepository = rideRepository;
         this.rideRatingRepository = rideRatingRepository;
         this.mapsService = mapsService;
@@ -113,6 +115,7 @@ public class RideService {
         this.chatSseHub = chatSseHub;
         this.statusSseHub = statusSseHub;
         this.muralSseHub = muralSseHub;
+        this.driverLocationPolicy = driverLocationPolicy;
     }
 
     // Sem @Transactional de proposito: estimate so toca o OSRM (chamada externa)
@@ -372,6 +375,7 @@ public class RideService {
         RideStateMachine.assertCanTransition(ride.getStatus(), RideStatus.COMPLETED);
         ride.setStatus(RideStatus.COMPLETED);
         ride.setCompletedAt(Instant.now());
+        clearDriverLocation(ride);
         log.info("Ride {} finalizada pelo motorista {}", ride.getId(), motorista.userId());
         chatSseHub.closeRide(rideId);
         publishStatus(ride);
@@ -414,6 +418,7 @@ public class RideService {
         ride.setCancelledAt(now);
         ride.setCancelReason(reason);
         ride.setCancellationFee(fee.signum() > 0 ? fee : null);
+        clearDriverLocation(ride);
 
         log.info("Ride {} cancelada por {} (role={}, fee={})",
                 ride.getId(), user.userId(), user.role(), ride.getCancellationFee());
@@ -436,9 +441,16 @@ public class RideService {
             throw new LocationUpdateNotAllowedException(s);
         }
 
-        ride.setDriverCurrentLat(req.lat());
-        ride.setDriverCurrentLng(req.lng());
-        ride.setDriverLocationUpdatedAt(Instant.now());
+        Instant now = Instant.now();
+        if (driverLocationPolicy.evaluate(ride, req, now) == DriverLocationPolicy.Decision.ACCEPT) {
+            ride.setDriverCurrentLat(req.lat());
+            ride.setDriverCurrentLng(req.lng());
+            ride.setDriverLocationUpdatedAt(driverLocationPolicy.fixTime(req, now));
+            ride.setDriverLocationAccuracyM(req.accuracyM());
+        } else {
+            log.debug("Posicao fora de ordem ignorada na ride {} (fix {} <= atual {})",
+                    rideId, req.recordedAt(), ride.getDriverLocationUpdatedAt());
+        }
 
         return RideResponse.from(ride, computeDriverDistanceKm(ride));
     }
@@ -723,6 +735,17 @@ public class RideService {
         }
         String t = s.trim();
         return t.isEmpty() ? null : t;
+    }
+
+    /**
+     * Minimizacao (LGPD): encerrada a corrida, a posicao do motorista nao tem
+     * mais finalidade para o passageiro nem para o link compartilhado.
+     */
+    private static void clearDriverLocation(Ride ride) {
+        ride.setDriverCurrentLat(null);
+        ride.setDriverCurrentLng(null);
+        ride.setDriverLocationUpdatedAt(null);
+        ride.setDriverLocationAccuracyM(null);
     }
 
     private Ride loadAsAcceptingDriver(AuthenticatedUser motorista, UUID rideId) {

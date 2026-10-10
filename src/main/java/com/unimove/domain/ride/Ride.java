@@ -127,8 +127,12 @@ public class Ride {
     @Column(name = "driver_current_lng", precision = 10, scale = 7)
     private BigDecimal driverCurrentLng;
 
+    /** Instante em que o GPS fixou a posicao (V24); cai para o de chegada se o app nao mandar. */
     @Column(name = "driver_location_updated_at")
     private Instant driverLocationUpdatedAt;
+
+    @Column(name = "driver_location_accuracy_m", precision = 8, scale = 1)
+    private BigDecimal driverLocationAccuracyM;
 
     /**
      * ETA (minutos) do motorista ate a origem, calculado UMA vez no aceite via
