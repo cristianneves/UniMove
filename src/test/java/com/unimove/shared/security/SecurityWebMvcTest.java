@@ -64,7 +64,7 @@ class SecurityWebMvcTest {
     void setUp() {
         passageiro = user(Role.PASSAGEIRO);
         motorista = user(Role.MOTORISTA);
-        when(accountStatusChecker.stateOf(any())).thenReturn(AccountState.ACTIVE);
+        when(accountStatusChecker.stateOf(any(), any())).thenReturn(AccountState.ACTIVE);
     }
 
     @Test
@@ -110,7 +110,7 @@ class SecurityWebMvcTest {
     @Test
     @DisplayName("conta suspensa com token ainda valido → 403 com motivo, sem chegar ao service")
     void suspendedAccountIsBlockedImmediately() throws Exception {
-        when(accountStatusChecker.stateOf(passageiro.getId())).thenReturn(AccountState.SUSPENDED);
+        when(accountStatusChecker.stateOf(eq(passageiro.getId()), any())).thenReturn(AccountState.SUSPENDED);
 
         mvc.perform(get("/rides/history").header("Authorization", bearer(passageiro)))
                 .andExpect(status().isForbidden())
@@ -122,7 +122,7 @@ class SecurityWebMvcTest {
     @Test
     @DisplayName("conta excluida com token ainda valido → 401")
     void deletedAccountIsUnauthorized() throws Exception {
-        when(accountStatusChecker.stateOf(passageiro.getId())).thenReturn(AccountState.GONE);
+        when(accountStatusChecker.stateOf(eq(passageiro.getId()), any())).thenReturn(AccountState.GONE);
 
         mvc.perform(get("/rides/history").header("Authorization", bearer(passageiro)))
                 .andExpect(status().isUnauthorized())
@@ -132,11 +132,34 @@ class SecurityWebMvcTest {
     @Test
     @DisplayName("rota publica continua acessivel com token de conta bloqueada")
     void publicRouteIgnoresBlockedToken() throws Exception {
-        when(accountStatusChecker.stateOf(passageiro.getId())).thenReturn(AccountState.SUSPENDED);
+        when(accountStatusChecker.stateOf(eq(passageiro.getId()), any())).thenReturn(AccountState.SUSPENDED);
         when(cityCatalog.listActive()).thenReturn(List.of());
 
         mvc.perform(get("/cities").header("Authorization", bearer(passageiro)))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("token anterior a troca de senha → 401 pedindo novo login")
+    void revokedTokenIsUnauthorized() throws Exception {
+        when(accountStatusChecker.stateOf(eq(passageiro.getId()), any())).thenReturn(AccountState.REVOKED);
+
+        mvc.perform(get("/rides/history").header("Authorization", bearer(passageiro)))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Sessão encerrada porque a senha foi alterada. Entre novamente."));
+    }
+
+    @Test
+    @DisplayName("senha temporaria: rotas comuns → 403 pedindo troca")
+    void temporaryPasswordBlocksOtherRoutes() throws Exception {
+        when(accountStatusChecker.stateOf(eq(passageiro.getId()), any()))
+                .thenReturn(AccountState.PASSWORD_CHANGE_REQUIRED);
+
+        mvc.perform(get("/rides/history").header("Authorization", bearer(passageiro)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value(
+                        "Troque a senha temporária antes de continuar (PUT /users/me/password)."));
+        verify(rideService, never()).history(any(), any(), any());
     }
 
     @Test

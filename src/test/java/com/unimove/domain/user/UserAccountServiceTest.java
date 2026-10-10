@@ -10,6 +10,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -74,28 +75,51 @@ class UserAccountServiceTest {
     @Test
     @DisplayName("stateOf: ACTIVE → ACTIVE")
     void activeIsActive() {
-        when(userRepository.findStatusById(userId)).thenReturn(Optional.of(UserStatus.ACTIVE));
-        assertThat(service.stateOf(userId)).isEqualTo(AccountState.ACTIVE);
+        snapshot(UserStatus.ACTIVE, null, false);
+        assertThat(service.stateOf(userId, Instant.now())).isEqualTo(AccountState.ACTIVE);
     }
 
     @Test
     @DisplayName("stateOf: SUSPENDED → SUSPENDED")
     void suspendedIsSuspended() {
-        when(userRepository.findStatusById(userId)).thenReturn(Optional.of(UserStatus.SUSPENDED));
-        assertThat(service.stateOf(userId)).isEqualTo(AccountState.SUSPENDED);
+        snapshot(UserStatus.SUSPENDED, null, false);
+        assertThat(service.stateOf(userId, Instant.now())).isEqualTo(AccountState.SUSPENDED);
     }
 
     @Test
     @DisplayName("stateOf: DELETED → GONE (token de conta excluida nao autentica)")
     void deletedIsGone() {
-        when(userRepository.findStatusById(userId)).thenReturn(Optional.of(UserStatus.DELETED));
-        assertThat(service.stateOf(userId)).isEqualTo(AccountState.GONE);
+        snapshot(UserStatus.DELETED, null, false);
+        assertThat(service.stateOf(userId, Instant.now())).isEqualTo(AccountState.GONE);
     }
 
     @Test
     @DisplayName("stateOf: usuario inexistente → GONE")
     void missingIsGone() {
-        when(userRepository.findStatusById(userId)).thenReturn(Optional.empty());
-        assertThat(service.stateOf(userId)).isEqualTo(AccountState.GONE);
+        when(userRepository.findAccountSnapshot(userId)).thenReturn(Optional.empty());
+        assertThat(service.stateOf(userId, Instant.now())).isEqualTo(AccountState.GONE);
+    }
+
+    @Test
+    @DisplayName("stateOf: token emitido antes da troca de senha → REVOKED")
+    void tokenBeforePasswordChangeIsRevoked() {
+        Instant changed = Instant.parse("2026-10-10T12:00:00.700Z");
+        snapshot(UserStatus.ACTIVE, changed, false);
+
+        assertThat(service.stateOf(userId, Instant.parse("2026-10-10T11:59:59Z"))).isEqualTo(AccountState.REVOKED);
+        // iat tem precisao de segundo: o token novo, emitido no mesmo segundo, segue valido.
+        assertThat(service.stateOf(userId, Instant.parse("2026-10-10T12:00:00Z"))).isEqualTo(AccountState.ACTIVE);
+    }
+
+    @Test
+    @DisplayName("stateOf: senha temporaria → PASSWORD_CHANGE_REQUIRED")
+    void temporaryPassword() {
+        snapshot(UserStatus.ACTIVE, null, true);
+        assertThat(service.stateOf(userId, Instant.now())).isEqualTo(AccountState.PASSWORD_CHANGE_REQUIRED);
+    }
+
+    private void snapshot(UserStatus status, Instant validAfter, boolean mustChange) {
+        when(userRepository.findAccountSnapshot(userId))
+                .thenReturn(Optional.of(new AccountSnapshot(status, validAfter, mustChange)));
     }
 }

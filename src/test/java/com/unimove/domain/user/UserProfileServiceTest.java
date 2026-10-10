@@ -74,10 +74,17 @@ class UserProfileServiceTest {
         when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
         when(passwordEncoder.matches("senhaAtual", "hash-antigo")).thenReturn(true);
         when(passwordEncoder.encode("senhaNova123")).thenReturn("hash-novo");
+        when(jwtService.generate(user)).thenReturn(new JwtService.IssuedToken("jwt-novo", Instant.now()));
+        user.setMustChangePassword(true);
 
-        service.changePassword(auth, "senhaAtual", "senhaNova123");
+        var resp = service.changePassword(auth, "senhaAtual", "senhaNova123");
 
         assertThat(user.getPasswordHash()).isEqualTo("hash-novo");
+        // Revoga os tokens anteriores, encerra a senha temporaria e devolve token novo.
+        assertThat(user.getTokensValidAfter()).isNotNull();
+        assertThat(user.isMustChangePassword()).isFalse();
+        assertThat(resp.token()).isEqualTo("jwt-novo");
+        assertThat(resp.mustChangePassword()).isFalse();
     }
 
     @Test
@@ -140,6 +147,8 @@ class UserProfileServiceTest {
         // Alfabeto sem caracteres ambíguos (0/O, 1/l/I)
         assertThat(resp.temporaryPassword()).matches("[A-HJ-NP-Za-hj-km-np-z2-9]{10}");
         assertThat(user.getPasswordHash()).isEqualTo("hash-temporario");
+        assertThat(user.isMustChangePassword()).isTrue();
+        assertThat(user.getTokensValidAfter()).isNotNull();
         verify(passwordEncoder).encode(resp.temporaryPassword());
         verify(auditLog).record(ADMIN_ID, com.unimove.domain.audit.AuditAction.USER_PASSWORD_RESET,
                 "USER", USER_ID, null);

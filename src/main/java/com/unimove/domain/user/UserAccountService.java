@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -46,14 +47,21 @@ public class UserAccountService implements UserDirectory, AccountStatusChecker {
 
     @Override
     @Transactional(readOnly = true)
-    public AccountState stateOf(UUID userId) {
-        return userRepository.findStatusById(userId)
-                .map(status -> switch (status) {
-                    case ACTIVE -> AccountState.ACTIVE;
-                    case SUSPENDED -> AccountState.SUSPENDED;
-                    case DELETED -> AccountState.GONE;
-                })
-                .orElse(AccountState.GONE);
+    public AccountState stateOf(UUID userId, Instant tokenIssuedAt) {
+        AccountSnapshot account = userRepository.findAccountSnapshot(userId).orElse(null);
+        if (account == null || account.status() == UserStatus.DELETED) {
+            return AccountState.GONE;
+        }
+        if (account.status() == UserStatus.SUSPENDED) {
+            return AccountState.SUSPENDED;
+        }
+        // iat do JWT tem precisao de segundo: compara truncado, senao o token
+        // emitido no mesmo segundo da troca (o novo) seria recusado.
+        if (account.tokensValidAfter() != null && tokenIssuedAt != null
+                && tokenIssuedAt.isBefore(account.tokensValidAfter().truncatedTo(ChronoUnit.SECONDS))) {
+            return AccountState.REVOKED;
+        }
+        return account.mustChangePassword() ? AccountState.PASSWORD_CHANGE_REQUIRED : AccountState.ACTIVE;
     }
 
     @Transactional

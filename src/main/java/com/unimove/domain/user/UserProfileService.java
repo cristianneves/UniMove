@@ -4,6 +4,7 @@ import com.unimove.domain.audit.AdminAuditLog;
 import com.unimove.domain.audit.AuditAction;
 import com.unimove.domain.city.CityCatalog;
 import com.unimove.domain.user.dto.AdminResetPasswordResponse;
+import com.unimove.domain.user.dto.AuthResponse;
 import com.unimove.domain.user.dto.UpdateProfileRequest;
 import com.unimove.domain.user.dto.UpdateProfileResponse;
 import com.unimove.domain.user.dto.UserProfileResponse;
@@ -115,8 +116,12 @@ public class UserProfileService {
         return new UpdateProfileResponse(UserProfileResponse.from(user, driver), token, tokenExpiresAt);
     }
 
+    /**
+     * Troca a senha, revoga todos os tokens anteriores e devolve um novo para
+     * esta sessao continuar. Tambem e o caminho para sair da senha temporaria.
+     */
     @Transactional
-    public void changePassword(AuthenticatedUser auth, String currentPassword, String newPassword) {
+    public AuthResponse changePassword(AuthenticatedUser auth, String currentPassword, String newPassword) {
         User user = userRepository.findById(auth.userId())
                 .orElseThrow(UserNotFoundException::new);
         // Conta criada por login social nao tem senha atual para conferir.
@@ -130,7 +135,10 @@ public class UserProfileService {
             throw new InvalidCurrentPasswordException();
         }
         user.setPasswordHash(passwordEncoder.encode(newPassword));
-        log.info("Senha alterada pelo próprio usuário {}", user.getId());
+        user.setMustChangePassword(false);
+        user.setTokensValidAfter(Instant.now());
+        log.info("Senha alterada pelo próprio usuário {} (sessões anteriores revogadas)", user.getId());
+        return AuthResponse.of(user, jwtService.generate(user));
     }
 
     /**
@@ -147,6 +155,9 @@ public class UserProfileService {
         }
         String temporaryPassword = generateTemporaryPassword();
         user.setPasswordHash(passwordEncoder.encode(temporaryPassword));
+        // Temporaria so serve para escolher outra; e quem tinha a senha antiga perde a sessao.
+        user.setMustChangePassword(true);
+        user.setTokensValidAfter(Instant.now());
         auditLog.record(adminId, AuditAction.USER_PASSWORD_RESET, "USER", targetUserId, null);
         log.warn("Senha do usuário {} resetada pelo admin {}", targetUserId, adminId);
         return new AdminResetPasswordResponse(user.getId(), user.getEmail(), temporaryPassword);

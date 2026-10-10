@@ -15,6 +15,12 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     boolean existsByEmail(String email);
     boolean existsByPhone(String phone);
 
+    @Query("""
+            select new com.unimove.domain.user.AccountSnapshot(u.status, u.tokensValidAfter, u.mustChangePassword)
+            from User u where u.id = :id
+            """)
+    Optional<AccountSnapshot> findAccountSnapshot(@Param("id") UUID id);
+
     @Query("select u.status from User u where u.id = :id")
     Optional<UserStatus> findStatusById(@Param("id") UUID id);
 

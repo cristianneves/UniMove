@@ -89,6 +89,12 @@ public class SecurityConfig {
         if (blocked == AccountStatusChecker.AccountState.SUSPENDED) {
             writeError(res, req.getRequestURI(), HttpStatus.FORBIDDEN,
                     "Conta suspensa. Entre em contato com o suporte para mais informações.");
+        } else if (blocked == AccountStatusChecker.AccountState.PASSWORD_CHANGE_REQUIRED) {
+            writeError(res, req.getRequestURI(), HttpStatus.FORBIDDEN,
+                    "Troque a senha temporária antes de continuar (PUT /users/me/password).");
+        } else if (blocked == AccountStatusChecker.AccountState.REVOKED) {
+            writeError(res, req.getRequestURI(), HttpStatus.UNAUTHORIZED,
+                    "Sessão encerrada porque a senha foi alterada. Entre novamente.");
         } else if (blocked == AccountStatusChecker.AccountState.GONE) {
             writeError(res, req.getRequestURI(), HttpStatus.UNAUTHORIZED,
                     "Sessão inválida: a conta não existe mais.");

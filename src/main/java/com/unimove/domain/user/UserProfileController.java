@@ -1,5 +1,6 @@
 package com.unimove.domain.user;
 
+import com.unimove.domain.user.dto.AuthResponse;
 import com.unimove.domain.user.dto.ChangePasswordRequest;
 import com.unimove.domain.user.dto.UpdateProfileRequest;
 import com.unimove.domain.user.dto.UpdateProfileResponse;
@@ -48,11 +49,11 @@ public class UserProfileController {
     }
 
     @PutMapping("/password")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
     @Operation(summary = "Troca a senha do usuário autenticado",
-            description = "Exige a senha atual. Retorna 400 se a senha atual estiver incorreta.")
-    public void changePassword(@AuthenticationPrincipal AuthenticatedUser user,
-                               @Valid @RequestBody ChangePasswordRequest req) {
-        userProfileService.changePassword(user, req.currentPassword(), req.newPassword());
+            description = "Exige a senha atual (400 se incorreta). Revoga todos os tokens anteriores e devolve "
+                    + "um novo em `token` — o app deve substituí-lo. Também encerra a senha temporária do reset.")
+    public AuthResponse changePassword(@AuthenticationPrincipal AuthenticatedUser user,
+                                       @Valid @RequestBody ChangePasswordRequest req) {
+        return userProfileService.changePassword(user, req.currentPassword(), req.newPassword());
     }
 }

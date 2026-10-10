@@ -60,12 +60,21 @@ public class JwtService {
     }
 
     public AuthenticatedUser parse(String token) {
+        return parseToken(token).user();
+    }
+
+    /** Valida a assinatura/expiracao e devolve o principal junto com o {@code iat}. */
+    public ParsedToken parseToken(String token) {
         Claims claims = Jwts.parser()
                 .verifyWith(key)
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();
+        Date issuedAt = claims.getIssuedAt();
+        return new ParsedToken(toPrincipal(claims), issuedAt == null ? null : issuedAt.toInstant());
+    }
 
+    private static AuthenticatedUser toPrincipal(Claims claims) {
         return new AuthenticatedUser(
                 UUID.fromString(claims.getSubject()),
                 claims.get("email", String.class),
@@ -75,4 +84,6 @@ public class JwtService {
     }
 
     public record IssuedToken(String token, Instant expiresAt) {}
+
+    public record ParsedToken(AuthenticatedUser user, Instant issuedAt) {}
 }

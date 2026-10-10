@@ -89,6 +89,14 @@ public class User {
     @Column(name = "deleted_at")
     private Instant deletedAt;
 
+    /** JWT emitido antes disto nao vale mais (troca/reset de senha, V29). */
+    @Column(name = "tokens_valid_after")
+    private Instant tokensValidAfter;
+
+    /** Senha temporaria do reset: so serve para escolher outra (V29). */
+    @Column(name = "must_change_password", nullable = false)
+    private boolean mustChangePassword;
+
     @PrePersist
     void onCreate() {
         if (id == null) {

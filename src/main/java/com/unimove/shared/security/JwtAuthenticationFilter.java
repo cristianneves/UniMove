@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.time.Instant;
 import java.util.List;
 
 @Component
@@ -46,8 +47,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         String token = header.substring(BEARER_PREFIX.length()).trim();
         AuthenticatedUser principal;
+        Instant issuedAt;
         try {
-            principal = jwtService.parse(token);
+            JwtService.ParsedToken parsed = jwtService.parseToken(token);
+            principal = parsed.user();
+            issuedAt = parsed.issuedAt();
         } catch (JwtException | IllegalArgumentException ex) {
             log.debug("JWT inválido: {}", ex.getMessage());
             SecurityContextHolder.clearContext();
@@ -60,7 +64,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         // A conta bloqueada so deixa de autenticar: rota publica segue
         // funcionando (ex.: recadastro com token velho no app) e a protegida
         // cai no entry point, que le o motivo deste atributo.
-        AccountStatusChecker.AccountState state = accountStatusChecker.stateOf(principal.userId());
+        AccountStatusChecker.AccountState state = accountStatusChecker.stateOf(principal.userId(), issuedAt);
+        // Senha temporaria: autentica so para trocar a senha e ler o perfil.
+        if (state == AccountStatusChecker.AccountState.PASSWORD_CHANGE_REQUIRED && allowedWhileTemporary(request)) {
+            state = AccountStatusChecker.AccountState.ACTIVE;
+        }
         if (state != AccountStatusChecker.AccountState.ACTIVE) {
             request.setAttribute(BLOCKED_ACCOUNT_ATTRIBUTE, state);
             SecurityContextHolder.clearContext();
@@ -75,5 +83,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         );
         SecurityContextHolder.getContext().setAuthentication(auth);
         chain.doFilter(request, response);
+    }
+
+    private static boolean allowedWhileTemporary(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        return ("PUT".equals(request.getMethod()) && "/users/me/password".equals(path))
+                || ("GET".equals(request.getMethod()) && "/users/me".equals(path));
     }
 }
