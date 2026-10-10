@@ -16,6 +16,12 @@ spring:
         jdbc:
           time_zone: UTC
     open-in-view: false
+  servlet:
+    multipart:
+      # Documentos do motorista: teto de 5 MB conferido no service; aqui so a
+      # folga do envelope multipart. Acima disso o Spring corta com 413.
+      max-file-size: 6MB
+      max-request-size: 7MB
   flyway:
     enabled: true
     locations: classpath:db/migration
@@ -64,6 +70,14 @@ app:
       # Android com serverClientId devolve o client ID WEB, iOS devolve o client ID iOS.
       client-ids: ${GOOGLE_CLIENT_IDS:}
       jwk-set-uri: ${GOOGLE_JWK_SET_URI:https://www.googleapis.com/oauth2/v3/certs}
+  storage:
+    supabase:
+      # Bucket PRIVADO dos documentos do motorista (CNH/CRLV/selfie). Sem url/key o
+      # upload responde 503 (dev/testes). service-key = service_role: so no backend.
+      url: ${SUPABASE_URL:}
+      service-key: ${SUPABASE_SERVICE_KEY:}
+      bucket: ${SUPABASE_DOCUMENTS_BUCKET:driver-documents}
+      signed-url-ttl-seconds: ${SUPABASE_SIGNED_URL_TTL_SECONDS:300}
   whatsapp:
     # Numero da UniMove em E.164 sem '+'. So usado com channel=WHATSAPP.
     business-number: ${WHATSAPP_BUSINESS_NUMBER:}

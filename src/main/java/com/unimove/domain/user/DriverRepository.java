@@ -40,6 +40,10 @@ public interface DriverRepository extends JpaRepository<Driver, UUID> {
             """)
     List<PendingDriverItem> findPending();
 
+    boolean existsByCpfAndIdNot(String cpf, UUID id);
+
+    boolean existsByCnhNumberAndIdNot(String cnhNumber, UUID id);
+
     long countByOnlineTrue();
 
     long countByApprovedFalse();
