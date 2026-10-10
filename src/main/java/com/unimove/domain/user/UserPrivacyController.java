@@ -40,11 +40,13 @@ public class UserPrivacyController {
     }
 
     @PutMapping("/preferences")
-    @Operation(summary = "Liga/desliga comunicação promocional",
-            description = "Notificações transacionais (corrida, segurança, conta) não são opcionais.")
+    @Operation(summary = "Comunicação promocional e preferências do pedido",
+            description = "Notificações transacionais (corrida, segurança, conta) não são opcionais. "
+                    + "Passageiro pode guardar pagamento e categoria preferidos (PUT substitui: ausente = sem "
+                    + "preferência); motorista que os envia recebe 400.")
     public PrivacyPreferencesResponse updatePreferences(@AuthenticationPrincipal AuthenticatedUser user,
                                                         @Valid @RequestBody UpdatePreferencesRequest req) {
-        return service.updatePreferences(user, req.marketingOptIn());
+        return service.updatePreferences(user, req);
     }
 
     @PostMapping("/terms")

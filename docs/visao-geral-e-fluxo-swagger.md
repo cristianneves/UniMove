@@ -202,7 +202,7 @@ O preço base (`PricingPolicy`) é multiplicado por um fator de surge calculado 
 
 ## 5. Fluxo completo no Swagger UI
 
-> Subir a app com `mvn spring-boot:run` e abrir **http://localhost:8080/swagger-ui.html**. Todos os endpoints protegidos exigem o header `Authorization: Bearer <token>` — no Swagger, clicar no cadeado e colar `Bearer <token>` (ou só `<token>`, depende da config). Use o botão **Authorize** no topo.
+> Subir a app com `mvn spring-boot:run` e abrir **http://localhost:8080/swagger-ui.html**. A documentação é **restrita a ADMIN**: você cai em `/docs/login` e entra com e-mail e senha de admin. O admin do seed nasce com senha temporária e precisa trocá-la antes (`POST /auth/login` + `PUT /users/me/password`). Todos os endpoints protegidos exigem o header `Authorization: Bearer <token>` — no Swagger, clicar no cadeado e colar `Bearer <token>` (ou só `<token>`, depende da config). Use o botão **Authorize** no topo.
 
 ### 5.1 Cenário
 

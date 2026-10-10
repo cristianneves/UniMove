@@ -3,12 +3,12 @@ package com.unimove.domain.user;
 import com.unimove.domain.audit.AdminAuditLog;
 import com.unimove.domain.audit.AuditAction;
 import com.unimove.domain.city.CityCatalog;
-import com.unimove.domain.verification.PhoneVerificationService;
 import com.unimove.domain.user.dto.AdminResetPasswordResponse;
 import com.unimove.domain.user.dto.AuthResponse;
 import com.unimove.domain.user.dto.UpdateProfileRequest;
 import com.unimove.domain.user.dto.UpdateProfileResponse;
 import com.unimove.domain.user.dto.UserProfileResponse;
+import com.unimove.domain.verification.PhoneVerificationService;
 import com.unimove.shared.event.AccountAccessRevokedEvent;
 import com.unimove.shared.security.AuthenticatedUser;
 import com.unimove.shared.security.JwtService;
@@ -102,6 +102,11 @@ public class UserProfileService {
      * token — sem isso, mural e criação de corrida continuariam usando a
      * cidade antiga até o re-login.
      *
+     * <p>Tokens anteriores sao revogados: com a claim {@code cidade} antiga, uma
+     * sessao em outro aparelho continuaria operando na cidade abandonada. O
+     * token novo vale (iat comparado truncado ao segundo) e os streams SSE
+     * abertos com o velho sao encerrados — o cliente os reabre com o novo.
+     *
      * <p>Motorista que muda de cidade é derrubado para offline: continuar
      * "online" num mural que ele não vê mais o manteria no denominador do surge
      * da cidade que abandonou. Ele reentra pelo {@code POST /drivers/me/online}
@@ -125,6 +130,8 @@ public class UserProfileService {
         String token = null;
         Instant tokenExpiresAt = null;
         if (cidadeChanged) {
+            user.setTokensValidAfter(Instant.now());
+            events.publishEvent(new AccountAccessRevokedEvent(user.getId()));
             JwtService.IssuedToken issued = jwtService.generate(user);
             token = issued.token();
             tokenExpiresAt = issued.expiresAt();

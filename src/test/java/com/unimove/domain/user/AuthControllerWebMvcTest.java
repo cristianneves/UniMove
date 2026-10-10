@@ -218,6 +218,19 @@ class AuthControllerWebMvcTest {
     }
 
     @Test
+    void socialRegisterWithInvalidPlateReturns400() throws Exception {
+        SocialRegisterRequest req = new SocialRegisterRequest(SocialProvider.GOOGLE, "id-token",
+                "token-verificado", Role.MOTORISTA, "Remanso", VehicleType.MOTO, "PLACA 1", "2026-10");
+
+        mvc.perform(post("/auth/social/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(req)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.vehiclePlate").exists());
+        verify(socialAuthService, never()).register(any());
+    }
+
+    @Test
     void socialRegisterWithoutPhoneVerificationReturns400() throws Exception {
         String semVerificacao = """
                 {"provider":"GOOGLE","idToken":"id-token","role":"PASSAGEIRO","cidade":"Remanso"}

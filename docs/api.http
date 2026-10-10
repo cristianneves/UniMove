@@ -323,6 +323,22 @@ Content-Type: application/json
 GET {{host}}/rides/{{rideId}}
 Authorization: Bearer {{passageiroToken}}
 
+### 4.4b Link de compartilhamento (so o passageiro dono; 410 com a corrida encerrada)
+# Resposta: {"token":"...","path":"/share/{token}"} — abrir {{host}}{path} sem token.
+GET {{host}}/rides/{{rideId}}/share-link
+Authorization: Bearer {{passageiroToken}}
+
+### 4.4c Preferencias do pedido (PUT substitui: ausente = sem preferencia)
+PUT {{host}}/users/me/preferences
+Authorization: Bearer {{passageiroToken}}
+Content-Type: application/json
+
+{
+  "marketingOptIn": false,
+  "preferredPaymentMethod": "PIX",
+  "preferredCategory": "MOTO"
+}
+
 ### 4.5 Cancelar (passageiro pode cancelar em PENDING_PAYMENT, AVAILABLE_IN_MURAL ou DRIVER_EN_ROUTE)
 POST {{host}}/rides/{{rideId}}/cancel
 Authorization: Bearer {{passageiroToken}}

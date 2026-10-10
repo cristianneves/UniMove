@@ -2,9 +2,12 @@ package com.unimove.shared.exception;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
+import org.hibernate.query.sqm.PathElementException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.InvalidDataAccessApiUsageException;
+import org.springframework.data.mapping.PropertyReferenceException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -94,6 +97,29 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleDataIntegrity(DataIntegrityViolationException ex, HttpServletRequest req) {
         log.warn("Violação de integridade em {}: {}", req.getRequestURI(), ex.getMostSpecificCause().getMessage());
         return build(HttpStatus.CONFLICT, "Recurso conflitante com o estado atual.", req, null);
+    }
+
+    /**
+     * {@code ?sort=campoInexistente}: o Spring Data anexa o campo ao ORDER BY e
+     * o Hibernate nao o resolve. Os @Query do projeto sao validados no boot,
+     * entao caminho desconhecido em runtime so pode vir do sort do cliente.
+     * Qualquer outro uso invalido de acesso a dados segue como 500.
+     */
+    @ExceptionHandler({InvalidDataAccessApiUsageException.class, PropertyReferenceException.class})
+    public ResponseEntity<ApiError> handleInvalidSort(Exception ex, HttpServletRequest req) {
+        if (ex instanceof PropertyReferenceException || causedBy(ex, PathElementException.class)) {
+            return build(HttpStatus.BAD_REQUEST, "Parâmetro de ordenação inválido.", req, null);
+        }
+        return handleUnexpected(ex, req);
+    }
+
+    private static boolean causedBy(Throwable ex, Class<? extends Throwable> type) {
+        for (Throwable t = ex; t != null; t = t.getCause() == t ? null : t.getCause()) {
+            if (type.isInstance(t)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @ExceptionHandler(BusinessException.class)

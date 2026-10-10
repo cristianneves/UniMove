@@ -1,5 +1,7 @@
 package com.unimove.domain.user;
 
+import com.unimove.domain.ride.PaymentMethod;
+import com.unimove.domain.ride.RideCategory;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -85,6 +87,15 @@ public class User {
 
     @Column(name = "marketing_opt_in_at")
     private Instant marketingOptInAt;
+
+    /** Pre-selecao da tela de pedido do passageiro (V34). Nulo = sem preferencia. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "preferred_payment_method", length = 10)
+    private PaymentMethod preferredPaymentMethod;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "preferred_category", length = 10)
+    private RideCategory preferredCategory;
 
     @Column(name = "deleted_at")
     private Instant deletedAt;

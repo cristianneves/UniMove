@@ -1,11 +1,14 @@
 package com.unimove.domain.ride;
 
+import com.unimove.domain.ride.dto.ShareLinkResponse;
 import com.unimove.domain.ride.dto.SharedRideResponse;
 import com.unimove.domain.ride.dto.StopPoint;
 import com.unimove.domain.user.DriverService;
+import com.unimove.domain.user.Role;
 import com.unimove.domain.user.UserAccountService;
 import com.unimove.domain.user.dto.DriverPublicInfo;
 import com.unimove.domain.user.dto.PassengerPublicInfo;
+import com.unimove.shared.security.AuthenticatedUser;
 import com.unimove.shared.util.Haversine;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,16 +32,27 @@ public class RideShareService {
         this.driverService = driverService;
     }
 
+    /**
+     * Link para o passageiro mandar a quem acompanha a viagem. So o dono o
+     * recebe (o motorista tambem le RideResponse, por isso o token nao vai la)
+     * e so enquanto a corrida esta viva.
+     */
+    @Transactional(readOnly = true)
+    public ShareLinkResponse getLink(AuthenticatedUser passageiro, UUID rideId) {
+        Ride ride = rideRepository.findById(rideId).orElseThrow(RideNotFoundException::new);
+        if (passageiro.role() != Role.PASSAGEIRO || !ride.getPassageiroId().equals(passageiro.userId())) {
+            throw new RideAccessDeniedException();
+        }
+        assertShareable(ride);
+        return ShareLinkResponse.of(ride.getShareToken());
+    }
+
     @Transactional(readOnly = true)
     public SharedRideResponse getByToken(UUID token) {
         Ride ride = rideRepository.findByShareToken(token)
                 .orElseThrow(ShareLinkNotFoundException::new);
 
-        if (ride.getStatus() == RideStatus.COMPLETED
-                || ride.getStatus() == RideStatus.CANCELLED
-                || ride.getStatus() == RideStatus.EXPIRED) {
-            throw new ShareLinkExpiredException();
-        }
+        assertShareable(ride);
 
         PassengerPublicInfo passenger = userAccountService.findPublicInfo(ride.getPassageiroId())
                 .orElse(new PassengerPublicInfo(null));
@@ -75,6 +89,14 @@ public class RideShareService {
                 ride.getAcceptedAt(),
                 ride.getStartedAt()
         );
+    }
+
+    private static void assertShareable(Ride ride) {
+        if (ride.getStatus() == RideStatus.COMPLETED
+                || ride.getStatus() == RideStatus.CANCELLED
+                || ride.getStatus() == RideStatus.EXPIRED) {
+            throw new ShareLinkExpiredException();
+        }
     }
 
     private BigDecimal computeDriverDistanceKm(Ride ride) {

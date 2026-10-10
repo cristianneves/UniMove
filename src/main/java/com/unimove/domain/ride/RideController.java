@@ -13,6 +13,7 @@ import com.unimove.domain.ride.dto.RideHistoryItem;
 import com.unimove.domain.ride.dto.RideMuralItem;
 import com.unimove.domain.ride.dto.RideResponse;
 import com.unimove.domain.ride.dto.RideRouteResponse;
+import com.unimove.domain.ride.dto.ShareLinkResponse;
 import com.unimove.domain.ride.dto.SubmitRatingRequest;
 import com.unimove.domain.ride.dto.UpdateDriverLocationRequest;
 import com.unimove.shared.security.AuthenticatedUser;
@@ -43,9 +44,11 @@ import java.util.UUID;
 public class RideController {
 
     private final RideService rideService;
+    private final RideShareService rideShareService;
 
-    public RideController(RideService rideService) {
+    public RideController(RideService rideService, RideShareService rideShareService) {
         this.rideService = rideService;
+        this.rideShareService = rideShareService;
     }
 
     @PostMapping
@@ -149,6 +152,13 @@ public class RideController {
     public RideResponse get(@AuthenticationPrincipal AuthenticatedUser user,
                             @PathVariable UUID id) {
         return rideService.get(user, id);
+    }
+
+    @GetMapping("/{id}/share-link")
+    @PreAuthorize("hasRole('PASSAGEIRO')")
+    public ShareLinkResponse shareLink(@AuthenticationPrincipal AuthenticatedUser user,
+                                       @PathVariable UUID id) {
+        return rideShareService.getLink(user, id);
     }
 
     @GetMapping("/{id}/route")

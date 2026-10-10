@@ -7,6 +7,7 @@ import com.unimove.domain.user.dto.RegisterRequest;
 import com.unimove.domain.verification.PhoneVerificationService;
 import com.unimove.shared.security.JwtService;
 import com.unimove.shared.util.CityNormalizer;
+import com.unimove.shared.util.VehiclePlate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -100,7 +101,7 @@ public class AuthService {
             driver.setApproved(false);
             driver.setOnline(false);
             driver.setVehicleType(req.vehicleType());
-            driver.setVehiclePlate(req.vehiclePlate().trim().toUpperCase());
+            driver.setVehiclePlate(VehiclePlate.normalize(req.vehiclePlate()));
             driverRepository.save(driver);
         }
 
@@ -110,14 +111,23 @@ public class AuthService {
 
     @Transactional(readOnly = true)
     public AuthResponse login(LoginRequest req) {
-        String email = req.email().trim().toLowerCase();
+        return issueToken(authenticate(req.email(), req.password()));
+    }
+
+    /**
+     * Confere e-mail/senha com o lockout por tentativas e exige conta ativa.
+     * Compartilhado pelo login do app e pelo login da documentacao (Swagger).
+     */
+    @Transactional(readOnly = true)
+    public User authenticate(String rawEmail, String password) {
+        String email = rawEmail.trim().toLowerCase();
         loginAttemptService.assertNotLocked(email);
         User user = userRepository.findByEmail(email).orElse(null);
         // Conta criada por login social nao tem senha. O erro e o mesmo de
         // credencial errada de proposito: dizer "esta conta usa Google" seria
         // enumeracao de usuario.
         boolean hasPassword = user != null && user.getPasswordHash() != null;
-        if (!hasPassword || !passwordEncoder.matches(req.password(), user.getPasswordHash())) {
+        if (!hasPassword || !passwordEncoder.matches(password, user.getPasswordHash())) {
             loginAttemptService.recordFailure(email);
             throw new BadCredentialsException("Credenciais inválidas");
         }
@@ -125,7 +135,7 @@ public class AuthService {
         if (user.getStatus() != UserStatus.ACTIVE) {
             throw new UserSuspendedException();
         }
-        return issueToken(user);
+        return user;
     }
 
     private AuthResponse issueToken(User user) {

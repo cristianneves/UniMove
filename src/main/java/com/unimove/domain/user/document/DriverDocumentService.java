@@ -7,14 +7,16 @@ import com.unimove.domain.user.DriverNotFoundException;
 import com.unimove.domain.user.DriverRepository;
 import com.unimove.domain.user.VehicleType;
 import com.unimove.domain.user.document.dto.DocumentFileUrlResponse;
-import com.unimove.domain.user.document.dto.PendingDocumentItem;
 import com.unimove.domain.user.document.dto.DriverDocumentItem;
 import com.unimove.domain.user.document.dto.DriverDocumentationResponse;
 import com.unimove.domain.user.document.dto.DriverProfileRequest;
+import com.unimove.domain.user.document.dto.PendingDocumentItem;
 import com.unimove.shared.security.FieldCrypto;
 import com.unimove.shared.util.Cpf;
+import com.unimove.shared.util.VehiclePlate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -56,6 +58,8 @@ public class DriverDocumentService {
     private static final Logger log = LoggerFactory.getLogger(DriverDocumentService.class);
 
     /** Validade de CNH e data civil brasileira. */
+    private static final String ALREADY_SUBMITTED = "Este documento já foi enviado e aguarda análise.";
+
     public static final ZoneId BRAZIL = ZoneId.of("America/Sao_Paulo");
 
     private final DriverRepository driverRepository;
@@ -143,7 +147,7 @@ public class DriverDocumentService {
         }
 
         String cpf = Cpf.digits(req.cpf());
-        String plate = req.vehiclePlate().replace("-", "").toUpperCase();
+        String plate = VehiclePlate.normalize(req.vehiclePlate());
         validateProfile(driver.getVehicleType(), req, today);
         String cpfHash = crypto.fingerprint(cpf);
         String cnhHash = crypto.fingerprint(req.cnhNumber());
@@ -205,7 +209,7 @@ public class DriverDocumentService {
                 && current != null && current.getStatus() == DriverDocumentStatus.APPROVED;
         if (current != null && current.getStatus() != DriverDocumentStatus.REJECTED && !renewingExpiredCnh) {
             throw new DocumentUploadNotAllowedException(current.getStatus() == DriverDocumentStatus.SUBMITTED
-                    ? "Este documento já foi enviado e aguarda análise."
+                    ? ALREADY_SUBMITTED
                     : "Este documento já está aprovado. Só é possível reenviar documento reprovado.");
         }
 
@@ -241,6 +245,12 @@ public class DriverDocumentService {
                 storage.delete(List.of(path));
             } catch (RuntimeException cleanup) {
                 log.warn("Arquivo orfao no storage apos falha ao gravar documento: {}", path);
+            }
+            // Clique duplo: o outro envio passou pelo mesmo check e gravou antes.
+            if (e instanceof DataIntegrityViolationException dive && String.valueOf(
+                    dive.getMostSpecificCause().getMessage()).contains("ux_driver_documents_one_submitted")) {
+                log.warn("Envio duplicado de {} barrado pelo banco (driver {})", type, driverId);
+                throw new DocumentUploadNotAllowedException(ALREADY_SUBMITTED);
             }
             throw e;
         }

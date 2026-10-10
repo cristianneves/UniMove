@@ -32,6 +32,13 @@ spring:
 
 server:
   shutdown: graceful
+  servlet:
+    session:
+      cookie:
+        # So a doc (Swagger) usa sessao; o TLS termina no Caddy, entao o
+        # Tomcat nao saberia sozinho que o cookie trafega em HTTPS.
+        secure: true
+        same-site: strict
   tomcat:
     threads:
       # O default de 200 threads nao faz sentido com 0.1 vCPU e custa memoria.

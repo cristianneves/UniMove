@@ -1,5 +1,7 @@
 package com.unimove.domain.user;
 
+import com.unimove.domain.ride.PaymentMethod;
+import com.unimove.domain.user.dto.UpdatePreferencesRequest;
 import com.unimove.domain.user.dto.PrivacyPreferencesResponse;
 import com.unimove.shared.security.AuthenticatedUser;
 import org.junit.jupiter.api.AfterEach;
@@ -21,7 +23,6 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
@@ -106,19 +107,30 @@ class UserPrivacyControllerWebMvcTest {
     void preferencesValidation() throws Exception {
         mvc.perform(put("/users/me/preferences").contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isBadRequest());
-        verify(service, never()).updatePreferences(any(), anyBoolean());
+        verify(service, never()).updatePreferences(any(), any());
     }
 
     @Test
     @DisplayName("PUT /users/me/preferences → 200 com transacional sempre ligado")
     void preferencesUpdate() throws Exception {
-        when(service.updatePreferences(user, true)).thenReturn(new PrivacyPreferencesResponse(
-                true, null, true, "2026-10", null, "2026-10", true));
+        when(service.updatePreferences(user, new UpdatePreferencesRequest(true, PaymentMethod.PIX, null)))
+                .thenReturn(new PrivacyPreferencesResponse(
+                        true, null, true, "2026-10", null, "2026-10", true, PaymentMethod.PIX, null));
 
         mvc.perform(put("/users/me/preferences").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"marketingOptIn\":true}"))
+                        .content("{\"marketingOptIn\":true,\"preferredPaymentMethod\":\"PIX\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.transactionalNotifications").value(true));
+                .andExpect(jsonPath("$.transactionalNotifications").value(true))
+                .andExpect(jsonPath("$.preferredPaymentMethod").value("PIX"));
+    }
+
+    @Test
+    @DisplayName("PUT /users/me/preferences com categoria inexistente → 400")
+    void preferencesInvalidEnum() throws Exception {
+        mvc.perform(put("/users/me/preferences").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"marketingOptIn\":true,\"preferredCategory\":\"ONIBUS\"}"))
+                .andExpect(status().isBadRequest());
+        verify(service, never()).updatePreferences(any(), any());
     }
 
     @Test
