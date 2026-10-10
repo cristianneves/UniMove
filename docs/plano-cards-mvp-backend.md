@@ -28,7 +28,7 @@ Decisões do dono do produto (10/10/2026): trava no boot para a V19; piloto **s�
 - [x] `RideJourneyIT`: estimate → criar → mural → aceite → GPS → SSE → start/complete → avaliação única → histórico; cancelamento; admin
 - [x] Chat: só participante, limites de estado (dentro do `RideJourneyIT`)
 - [x] Pagamento: `SIMULATED` ≠ `CASH` declarado
-- [ ] `docs/matriz-requisitos-mvp.md`
+- [x] `docs/matriz-requisitos-mvp.md` (+ ITs rodando no CI com Postgres de serviço)
 
 ## 3. RELEASE
 
