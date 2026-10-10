@@ -48,6 +48,10 @@ public abstract class IntegrationTestSupport {
         registry.add("spring.datasource.url", () -> System.getenv("IT_DATABASE_URL"));
         registry.add("spring.datasource.username", () -> env("IT_DATABASE_USER", "postgres"));
         registry.add("spring.datasource.password", () -> env("IT_DATABASE_PASSWORD", "it"));
+        // Todos os IT saem do mesmo IP (localhost); os limites por IP sao
+        // cobertos em RateLimitFilterTest e atrapalhariam os contratos aqui.
+        registry.add("app.rate-limit.auth.max-requests", () -> "100000");
+        registry.add("app.phone-verification.max-challenges-per-ip-hour", () -> "100000");
     }
 
     private static String env(String name, String fallback) {
