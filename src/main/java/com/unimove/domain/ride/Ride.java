@@ -121,14 +121,36 @@ public class Ride {
     @Column(name = "pix_payload", columnDefinition = "TEXT")
     private String pixPayload;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "payment_status", length = 20)
+    private PaymentStatus paymentStatus;
+
+    /** Dinheiro: nota com que o passageiro vai pagar ("troco para"). */
+    @Column(name = "cash_change_for", precision = 10, scale = 2)
+    private BigDecimal cashChangeFor;
+
+    /** Dinheiro: valor que o motorista registrou ter recebido. */
+    @Column(name = "cash_received_amount", precision = 10, scale = 2)
+    private BigDecimal cashReceivedAmount;
+
+    @Column(name = "payment_confirmed_at")
+    private Instant paymentConfirmedAt;
+
+    @Column(name = "payment_note", length = 500)
+    private String paymentNote;
+
     @Column(name = "driver_current_lat", precision = 10, scale = 7)
     private BigDecimal driverCurrentLat;
 
     @Column(name = "driver_current_lng", precision = 10, scale = 7)
     private BigDecimal driverCurrentLng;
 
+    /** Instante em que o GPS fixou a posicao (V24); cai para o de chegada se o app nao mandar. */
     @Column(name = "driver_location_updated_at")
     private Instant driverLocationUpdatedAt;
+
+    @Column(name = "driver_location_accuracy_m", precision = 8, scale = 1)
+    private BigDecimal driverLocationAccuracyM;
 
     /**
      * ETA (minutos) do motorista ate a origem, calculado UMA vez no aceite via

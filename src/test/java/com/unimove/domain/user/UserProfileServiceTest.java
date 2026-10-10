@@ -2,6 +2,8 @@ package com.unimove.domain.user;
 
 import com.unimove.domain.city.CityCatalog;
 import com.unimove.domain.city.CityNotServedException;
+import com.unimove.domain.verification.PhoneVerificationService;
+import com.unimove.shared.event.AccountAccessRevokedEvent;
 import com.unimove.domain.user.dto.AdminResetPasswordResponse;
 import com.unimove.domain.user.dto.UpdateProfileRequest;
 import com.unimove.domain.user.dto.UpdateProfileResponse;
@@ -15,6 +17,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.time.Instant;
@@ -44,6 +47,9 @@ class UserProfileServiceTest {
     @Mock PasswordEncoder passwordEncoder;
     @Mock JwtService jwtService;
     @Mock CityCatalog cityCatalog;
+    @Mock PhoneVerificationService phoneVerificationService;
+    @Mock ApplicationEventPublisher events;
+    @Mock com.unimove.domain.audit.AdminAuditLog auditLog;
 
     @InjectMocks UserProfileService service;
 
@@ -73,10 +79,43 @@ class UserProfileServiceTest {
         when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
         when(passwordEncoder.matches("senhaAtual", "hash-antigo")).thenReturn(true);
         when(passwordEncoder.encode("senhaNova123")).thenReturn("hash-novo");
+        when(jwtService.generate(user)).thenReturn(new JwtService.IssuedToken("jwt-novo", Instant.now()));
+        user.setMustChangePassword(true);
 
-        service.changePassword(auth, "senhaAtual", "senhaNova123");
+        var resp = service.changePassword(auth, "senhaAtual", "senhaNova123");
 
         assertThat(user.getPasswordHash()).isEqualTo("hash-novo");
+        // Revoga os tokens anteriores, encerra a senha temporaria e devolve token novo.
+        assertThat(user.getTokensValidAfter()).isNotNull();
+        assertThat(user.isMustChangePassword()).isFalse();
+        assertThat(resp.token()).isEqualTo("jwt-novo");
+        assertThat(resp.mustChangePassword()).isFalse();
+        verify(events).publishEvent(new AccountAccessRevokedEvent(USER_ID));
+    }
+
+    @Test
+    @DisplayName("changePhone troca para o numero verificado no WhatsApp")
+    void changePhoneHappyPath() {
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+        when(phoneVerificationService.consumeVerifiedPhone("tok")).thenReturn("5574988887777");
+
+        var resp = service.changePhone(auth, "tok");
+
+        assertThat(user.getPhone()).isEqualTo("5574988887777");
+        assertThat(user.getPhoneVerifiedAt()).isNotNull();
+        assertThat(resp.phone()).isEqualTo("5574988887777");
+    }
+
+    @Test
+    @DisplayName("changePhone para numero de outra conta → 409 sem alterar")
+    void changePhoneInUse() {
+        String before = user.getPhone();
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+        when(phoneVerificationService.consumeVerifiedPhone("tok")).thenReturn("5574911112222");
+        when(userRepository.existsByPhone("5574911112222")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.changePhone(auth, "tok")).isInstanceOf(PhoneAlreadyUsedException.class);
+        assertThat(user.getPhone()).isEqualTo(before);
     }
 
     @Test
@@ -139,7 +178,11 @@ class UserProfileServiceTest {
         // Alfabeto sem caracteres ambíguos (0/O, 1/l/I)
         assertThat(resp.temporaryPassword()).matches("[A-HJ-NP-Za-hj-km-np-z2-9]{10}");
         assertThat(user.getPasswordHash()).isEqualTo("hash-temporario");
+        assertThat(user.isMustChangePassword()).isTrue();
+        assertThat(user.getTokensValidAfter()).isNotNull();
         verify(passwordEncoder).encode(resp.temporaryPassword());
+        verify(auditLog).record(ADMIN_ID, com.unimove.domain.audit.AuditAction.USER_PASSWORD_RESET,
+                "USER", USER_ID, null);
     }
 
     @Test

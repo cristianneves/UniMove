@@ -16,6 +16,12 @@ spring:
         jdbc:
           time_zone: UTC
     open-in-view: false
+  servlet:
+    multipart:
+      # Documentos do motorista: teto de 5 MB conferido no service; aqui so a
+      # folga do envelope multipart. Acima disso o Spring corta com 413.
+      max-file-size: 6MB
+      max-request-size: 7MB
   flyway:
     enabled: true
     locations: classpath:db/migration
@@ -39,6 +45,15 @@ app:
       max-attempts: ${LOGIN_LOCKOUT_MAX_ATTEMPTS:5}
       lockout-minutes: ${LOGIN_LOCKOUT_MINUTES:15}
       cleanup-interval-ms: ${LOGIN_LOCKOUT_CLEANUP_INTERVAL_MS:600000}
+  rate-limit:
+    # Teto por janela fixa (em memoria). auth = login/cadastro/social por IP;
+    # maps = geocode/reverse por usuario. 429 + Retry-After quando estoura.
+    auth:
+      max-requests: ${RATE_LIMIT_AUTH_MAX:30}
+      window-minutes: ${RATE_LIMIT_AUTH_WINDOW_MINUTES:10}
+    maps:
+      max-requests: ${RATE_LIMIT_MAPS_MAX:60}
+      window-minutes: ${RATE_LIMIT_MAPS_WINDOW_MINUTES:1}
   phone-verification:
     # LOG = dev/testes (link e codigo saem no log, webhook aceita POST manual).
     # WHATSAPP = producao; exige app.whatsapp.* preenchido ou o startup falha.
@@ -55,6 +70,28 @@ app:
       # Android com serverClientId devolve o client ID WEB, iOS devolve o client ID iOS.
       client-ids: ${GOOGLE_CLIENT_IDS:}
       jwk-set-uri: ${GOOGLE_JWK_SET_URI:https://www.googleapis.com/oauth2/v3/certs}
+  security:
+    # 32 bytes em base64 (openssl rand -base64 32). Cifra CPF/CNH no banco.
+    # Obrigatoria em prod (o boot falha sem ela); em dev cai numa chave fixa com aviso.
+    data-encryption-key: ${DATA_ENCRYPTION_KEY:}
+  retention:
+    # Expurgo LGPD diario: corridas antigas perdem endereco/rota/posicao; arquivos de
+    # documento reprovados ou substituidos saem do storage. Ver docs/lgpd-inventario-dados.md.
+    enabled: ${RETENTION_ENABLED:true}
+    ride-years: ${RETENTION_RIDE_YEARS:5}
+    rejected-document-days: ${RETENTION_REJECTED_DOCUMENT_DAYS:90}
+  privacy:
+    # Versao vigente dos termos + politica (GET /legal/terms). Trocar exige novo aceite no cadastro.
+    terms-version: ${PRIVACY_TERMS_VERSION:2026-10}
+    policy-url: ${PRIVACY_POLICY_URL:https://unimove.app/privacidade}
+  storage:
+    supabase:
+      # Bucket PRIVADO dos documentos do motorista (CNH/CRLV/selfie). Sem url/key o
+      # upload responde 503 (dev/testes). service-key = service_role: so no backend.
+      url: ${SUPABASE_URL:}
+      service-key: ${SUPABASE_SERVICE_KEY:}
+      bucket: ${SUPABASE_DOCUMENTS_BUCKET:driver-documents}
+      signed-url-ttl-seconds: ${SUPABASE_SIGNED_URL_TTL_SECONDS:300}
   whatsapp:
     # Numero da UniMove em E.164 sem '+'. So usado com channel=WHATSAPP.
     business-number: ${WHATSAPP_BUSINESS_NUMBER:}
@@ -75,6 +112,11 @@ app:
     bandeira: 5.50
     preco-por-km: 2.10
     preco-por-min: 0.20
+    location:
+      # Sanidade da posicao do motorista no PUT /rides/{id}/driver-location (422 quando recusa).
+      max-age-seconds: ${DRIVER_LOCATION_MAX_AGE_SECONDS:120}
+      max-accuracy-m: ${DRIVER_LOCATION_MAX_ACCURACY_M:100}
+      max-speed-kmh: ${DRIVER_LOCATION_MAX_SPEED_KMH:180}
     expiration:
       # Corrida parada no mural sem motorista por mais que ttl-minutes vira EXPIRED.
       enabled: ${RIDE_EXPIRATION_ENABLED:true}

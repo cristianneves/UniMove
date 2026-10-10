@@ -44,21 +44,33 @@ public record CreateRideRequest(
 
         @Valid
         @Size(max = 5, message = "Maximo de 5 paradas intermediarias.")
-        List<StopPoint> stops
+        List<StopPoint> stops,
+
+        // Preco que o passageiro viu na estimativa. Se o recalculado divergir
+        // (surge mudou), o pedido volta 409 em vez de cobrar outro valor.
+        @DecimalMin(value = "0.0")
+        BigDecimal expectedPrice
 ) {
     public CreateRideRequest(BigDecimal latOrigem, BigDecimal lngOrigem,
+                             BigDecimal latDestino, BigDecimal lngDestino,
+                             RideCategory category, String origemEndereco, String destinoEndereco,
+                             List<StopPoint> stops) {
+        this(latOrigem, lngOrigem, latDestino, lngDestino, category, origemEndereco, destinoEndereco, stops, null);
+    }
+
+    public CreateRideRequest(BigDecimal latOrigem, BigDecimal lngOrigem,
                              BigDecimal latDestino, BigDecimal lngDestino) {
-        this(latOrigem, lngOrigem, latDestino, lngDestino, null, null, null, null);
+        this(latOrigem, lngOrigem, latDestino, lngDestino, null, null, null, null, null);
     }
 
     public CreateRideRequest(BigDecimal latOrigem, BigDecimal lngOrigem,
                              BigDecimal latDestino, BigDecimal lngDestino, RideCategory category) {
-        this(latOrigem, lngOrigem, latDestino, lngDestino, category, null, null, null);
+        this(latOrigem, lngOrigem, latDestino, lngDestino, category, null, null, null, null);
     }
 
     public CreateRideRequest(BigDecimal latOrigem, BigDecimal lngOrigem,
                              BigDecimal latDestino, BigDecimal lngDestino,
                              RideCategory category, List<StopPoint> stops) {
-        this(latOrigem, lngOrigem, latDestino, lngDestino, category, null, null, stops);
+        this(latOrigem, lngOrigem, latDestino, lngDestino, category, null, null, stops, null);
     }
 }

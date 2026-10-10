@@ -76,6 +76,29 @@ services:
       - key: GOOGLE_CLIENT_IDS
         sync: false
 
+      # --- Documentos do motorista (Supabase Storage, bucket privado) ---
+      # Sem os dois, o upload responde 503 — o resto da API segue normal.
+      # service_role so no backend; ver docs/homologacao-runbook.md.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+
+      # --- Criptografia de CPF/CNH (obrigatoria em prod: sem ela o boot falha) ---
+      # Gere com `openssl rand -base64 32` e guarde uma copia fora do Render:
+      # perder a chave torna os dados ilegiveis.
+      - key: DATA_ENCRYPTION_KEY
+        sync: false
+
+      # --- Privacidade (LGPD) ---
+      # sync: false pelo mesmo motivo do canal do WhatsApp: trocar a versao
+      # dos termos obriga novo aceite no cadastro; e decisao de produto, operada
+      # no dashboard, nao algo que o Blueprint deva resetar.
+      - key: PRIVACY_TERMS_VERSION
+        sync: false
+      - key: PRIVACY_POLICY_URL
+        sync: false
+
       # --- Mapas ---
       - key: OSRM_BASE_URL
         value: https://router.project-osrm.org

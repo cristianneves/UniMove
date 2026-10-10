@@ -19,6 +19,8 @@ public record RideMuralItem(
         BigDecimal preco,
         RideCategory category,
         PaymentMethod paymentMethod,
+        /** Dinheiro: nota do passageiro — o motorista sabe se precisa levar troco. */
+        BigDecimal cashChangeFor,
         Instant createdAt
 ) {
 
@@ -29,6 +31,6 @@ public record RideMuralItem(
                 ride.getLatOrigem(), ride.getLngOrigem(),
                 ride.getLatDestino(), ride.getLngDestino(),
                 ride.getDistanciaKm(), ride.getTempoMin(), ride.getPreco(),
-                ride.getCategory(), ride.getPaymentMethod(), ride.getCreatedAt());
+                ride.getCategory(), ride.getPaymentMethod(), ride.getCashChangeFor(), ride.getCreatedAt());
     }
 }

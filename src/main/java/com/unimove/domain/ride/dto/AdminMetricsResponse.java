@@ -14,6 +14,7 @@ public record AdminMetricsResponse(
         LocalDate to,
         RidesSummary rides,
         RevenueSummary revenue,
+        PaymentsSummary payments,
         UsersSummary users,
         List<MetricsDayItem> byDay
 ) {
@@ -29,11 +30,29 @@ public record AdminMetricsResponse(
             double cancellationRate
     ) {}
 
-    /** Receita reconhecida no período. */
+    /**
+     * Valor COBRADO no periodo: {@code gross} soma o preco das corridas
+     * concluidas, independente de o dinheiro ter entrado (inclui Pix simulado
+     * e dinheiro pendente/divergente). O que de fato foi recebido esta em
+     * {@link PaymentsSummary#cashConfirmed()}.
+     */
     public record RevenueSummary(
             BigDecimal gross,
             BigDecimal cancellationFees,
             BigDecimal averageTicket
+    ) {}
+
+    /**
+     * Recebimentos no periodo. {@code cashConfirmed} e o unico valor que de
+     * fato entrou (registrado pelo motorista); Pix sem PSP aparece so como
+     * contagem {@code pixSimulated} e nunca soma como receita recebida.
+     * {@code cashPending}/{@code cashDivergent} sao a fila de conciliacao.
+     */
+    public record PaymentsSummary(
+            BigDecimal cashConfirmed,
+            long cashPending,
+            long cashDivergent,
+            long pixSimulated
     ) {}
 
     /** Fotografia atual da base (não filtrada por período — é estado corrente). */

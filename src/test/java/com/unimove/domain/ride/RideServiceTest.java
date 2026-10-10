@@ -8,6 +8,7 @@ import com.unimove.domain.maps.RouteInfo;
 import com.unimove.domain.payment.PaymentService;
 import com.unimove.domain.ride.dto.AcceptRideRequest;
 import com.unimove.domain.ride.dto.CancelRideRequest;
+import com.unimove.domain.ride.dto.CashPaymentRequest;
 import com.unimove.domain.ride.dto.CategoryOption;
 import com.unimove.domain.ride.dto.ConfirmPaymentRequest;
 import com.unimove.domain.ride.dto.CreateRideRequest;
@@ -34,7 +35,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.math.BigDecimal;
@@ -82,6 +85,8 @@ class RideServiceTest {
     @Mock ChatSseHub chatSseHub;
     @Mock RideStatusSseHub statusSseHub;
     @Mock MuralSseHub muralSseHub;
+    @Mock com.unimove.domain.audit.AdminAuditLog auditLog;
+    @Spy DriverLocationPolicy driverLocationPolicy = new DriverLocationPolicy(DriverLocationProperties.defaults());
 
     @InjectMocks RideService rideService;
 
@@ -133,6 +138,51 @@ class RideServiceTest {
                 .isInstanceOf(ActiveRideExistsException.class);
 
         verify(rideRepository, never()).findByIdFetchingStops(any());
+    }
+
+    @Test
+    @DisplayName("create: clique duplo que passa pelo exists() e barrado pelo indice unico → 409")
+    void createTranslatesActiveRideIndexViolation() {
+        when(mapsService.route(anyList()))
+                .thenReturn(new RouteInfo(new BigDecimal("5.000"), 12, "poly"));
+        when(pricingPolicy.calculate(any(BigDecimal.class), eq(12), any(RideCategory.class), anyString()))
+                .thenReturn(new BigDecimal("18.40"));
+        when(rideRepository.save(any(Ride.class))).thenThrow(uniqueViolation("ux_rides_passenger_active"));
+
+        assertThatThrownBy(() -> rideService.create(pax, defaultRequest()))
+                .isInstanceOf(ActiveRideExistsException.class)
+                .hasMessageContaining("pedir outra");
+    }
+
+    @Test
+    @DisplayName("create: outra violacao de integridade nao vira 409 de corrida ativa")
+    void createKeepsUnrelatedIntegrityViolations() {
+        when(mapsService.route(anyList()))
+                .thenReturn(new RouteInfo(new BigDecimal("5.000"), 12, "poly"));
+        when(pricingPolicy.calculate(any(BigDecimal.class), eq(12), any(RideCategory.class), anyString()))
+                .thenReturn(new BigDecimal("18.40"));
+        when(rideRepository.save(any(Ride.class))).thenThrow(uniqueViolation("rides_share_token_key"));
+
+        assertThatThrownBy(() -> rideService.create(pax, defaultRequest()))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @DisplayName("accept: dois aceites simultaneos do mesmo motorista → o 2o vira 409 pelo indice")
+    void acceptTranslatesDriverActiveIndexViolation() {
+        Ride ride = rideAvailable(pax.userId(), CIDADE);
+        when(rideRepository.findByIdFetchingStops(ride.getId())).thenReturn(Optional.of(ride));
+        when(rideRepository.save(any(Ride.class))).thenThrow(uniqueViolation("ux_rides_driver_active"));
+
+        assertThatThrownBy(() -> rideService.accept(mot, ride.getId()))
+                .isInstanceOf(ActiveRideExistsException.class)
+                .hasMessageContaining("aceitar outra");
+        verify(statusSseHub, never()).broadcast(any(), any());
+    }
+
+    private static DataIntegrityViolationException uniqueViolation(String constraint) {
+        return new DataIntegrityViolationException("could not execute statement",
+                new java.sql.SQLException("ERROR: duplicate key value violates unique constraint \"" + constraint + "\""));
     }
 
     // ------------------------------------------------------------------------
@@ -609,13 +659,28 @@ class RideServiceTest {
     }
 
     @Test
-    @DisplayName("motorista não pode cancelar fora de DRIVER_EN_ROUTE")
-    void motoristaCannotCancelInProgress() {
+    @DisplayName("motorista cancela corrida em andamento com motivo, sem taxa, e a posicao some")
+    void motoristaCancelsInProgressWithReason() {
+        Ride ride = rideInProgress(pax.userId(), mot.userId());
+        ride.setDriverCurrentLat(new BigDecimal("-20.8"));
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        RideResponse resp = rideService.cancel(mot, ride.getId(), new CancelRideRequest("pneu furou"));
+
+        assertThat(resp.status()).isEqualTo(RideStatus.CANCELLED);
+        assertThat(resp.cancelledBy()).isEqualTo(CancelledBy.MOTORISTA);
+        assertThat(resp.cancellationFee()).isNull();
+        assertThat(resp.driverCurrentLat()).isNull();
+    }
+
+    @Test
+    @DisplayName("motorista sem motivo nao cancela corrida em andamento")
+    void motoristaCancelInProgressRequiresReason() {
         Ride ride = rideInProgress(pax.userId(), mot.userId());
         when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
 
-        assertThatThrownBy(() -> rideService.cancel(mot, ride.getId(), new CancelRideRequest("desisti")))
-                .isInstanceOf(IllegalRideTransitionException.class);
+        assertThatThrownBy(() -> rideService.cancel(mot, ride.getId(), null))
+                .isInstanceOf(MissingCancelReasonException.class);
     }
 
     @Test
@@ -625,7 +690,92 @@ class RideServiceTest {
         when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
 
         assertThatThrownBy(() -> rideService.cancel(pax, ride.getId(), null))
+                .isInstanceOf(PassengerCannotCancelInProgressException.class);
+        assertThat(ride.getStatus()).isEqualTo(RideStatus.IN_PROGRESS);
+    }
+
+    @Test
+    @DisplayName("admin cancela corrida presa em andamento, audita e fecha o chat")
+    void adminCancelsStuckRide() {
+        Ride ride = rideInProgress(pax.userId(), mot.userId());
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+        UUID adminId = UUID.randomUUID();
+
+        RideResponse resp = rideService.cancelByAdmin(ride.getId(), adminId, " motorista sumiu ");
+
+        assertThat(resp.status()).isEqualTo(RideStatus.CANCELLED);
+        assertThat(resp.cancelledBy()).isEqualTo(CancelledBy.ADMIN);
+        assertThat(resp.cancelReason()).isEqualTo("motorista sumiu");
+        verify(auditLog).record(eq(adminId), eq(com.unimove.domain.audit.AuditAction.RIDE_CANCELLED),
+                eq("RIDE"), eq(ride.getId()), anyString());
+        verify(chatSseHub).closeRide(ride.getId());
+    }
+
+    @Test
+    @DisplayName("admin nao cancela corrida ja terminada → 409")
+    void adminCannotCancelTerminal() {
+        Ride ride = rideInProgress(pax.userId(), mot.userId());
+        ride.setStatus(RideStatus.COMPLETED);
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        assertThatThrownBy(() -> rideService.cancelByAdmin(ride.getId(), UUID.randomUUID(), "x"))
                 .isInstanceOf(IllegalRideTransitionException.class);
+        verify(auditLog, never()).record(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("create: preco recalculado diferente do visto na estimativa → 409 sem gravar")
+    void createRejectsChangedPrice() {
+        when(mapsService.route(anyList())).thenReturn(new RouteInfo(new BigDecimal("5.000"), 12, "poly"));
+        when(pricingPolicy.calculate(any(BigDecimal.class), eq(12), any(RideCategory.class), anyString()))
+                .thenReturn(new BigDecimal("18.40"));
+        CreateRideRequest req = new CreateRideRequest(new BigDecimal("-20.82"), new BigDecimal("-49.38"),
+                new BigDecimal("-20.83"), new BigDecimal("-49.39"), null, null, null, null, new BigDecimal("15.00"));
+
+        assertThatThrownBy(() -> rideService.create(pax, req))
+                .isInstanceOf(PriceChangedException.class)
+                .hasMessageContaining("18.40");
+        verify(rideRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("create: preco igual ao da estimativa segue normal")
+    void createAcceptsSamePrice() {
+        when(mapsService.route(anyList())).thenReturn(new RouteInfo(new BigDecimal("5.000"), 12, "poly"));
+        when(pricingPolicy.calculate(any(BigDecimal.class), eq(12), any(RideCategory.class), anyString()))
+                .thenReturn(new BigDecimal("18.40"));
+        when(rideRepository.save(any(Ride.class))).thenAnswer(inv -> inv.getArgument(0));
+        CreateRideRequest req = new CreateRideRequest(new BigDecimal("-20.82"), new BigDecimal("-49.38"),
+                new BigDecimal("-20.83"), new BigDecimal("-49.39"), null, null, null, null, new BigDecimal("18.4"));
+
+        assertThat(rideService.create(pax, req).preco()).isEqualByComparingTo("18.40");
+    }
+
+    @Test
+    @DisplayName("earnings separa dinheiro recebido, pendente, divergente e Pix simulado")
+    void earningsBreakdown() {
+        when(rideRepository.sumDriverEarnings(eq(mot.userId()), any(), any())).thenReturn(
+                new com.unimove.domain.ride.dto.EarningsAggregate(4, new BigDecimal("80.00"),
+                        new BigDecimal("25.00"), new BigDecimal("20.00"), 1L, new BigDecimal("30.00")));
+        when(rideRepository.findDriverEarningsByDay(eq(mot.userId()), any(), any())).thenReturn(List.of());
+
+        var resp = rideService.getDriverEarnings(mot.userId(), null, null);
+
+        assertThat(resp.grossEarnings()).isEqualByComparingTo("80.00");
+        assertThat(resp.payments().cashReceived()).isEqualByComparingTo("25.00");
+        assertThat(resp.payments().cashPending()).isEqualByComparingTo("20.00");
+        assertThat(resp.payments().cashDivergentRides()).isEqualTo(1);
+        assertThat(resp.payments().pixSimulated()).isEqualByComparingTo("30.00");
+    }
+
+    @Test
+    @DisplayName("admin lista corridas: periodo ausente vira sem limite e cidade e normalizada")
+    void adminListDefaults() {
+        rideService.listAdminRides(null, RideStatus.COMPLETED, "Remanso/BA", null, null,
+                org.springframework.data.domain.Pageable.unpaged());
+
+        verify(rideRepository).findAllForAdmin(eq(null), eq(RideStatus.COMPLETED), eq("remanso-ba"),
+                eq(Instant.EPOCH), eq(Instant.parse("9999-12-31T00:00:00Z")), any());
     }
 
     @Test
@@ -919,12 +1069,12 @@ class RideServiceTest {
     void subscribeStatusRegistersForParticipant() {
         Ride ride = rideEnRoute(pax.userId(), mot.userId());
         when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
-        when(statusSseHub.register(ride.getId())).thenReturn(new SseEmitter());
+        when(statusSseHub.register(eq(ride.getId()), any())).thenReturn(new SseEmitter());
 
         SseEmitter emitter = rideService.subscribeStatus(pax, ride.getId());
 
         assertThat(emitter).isNotNull();
-        verify(statusSseHub).register(ride.getId());
+        verify(statusSseHub).register(eq(ride.getId()), any());
         verify(statusSseHub, never()).closeRide(any());
     }
 
@@ -933,7 +1083,7 @@ class RideServiceTest {
     void subscribeStatusClosesWhenTerminal() {
         Ride ride = rideCompleted(pax.userId(), mot.userId());
         when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
-        when(statusSseHub.register(ride.getId())).thenReturn(new SseEmitter());
+        when(statusSseHub.register(eq(ride.getId()), any())).thenReturn(new SseEmitter());
 
         rideService.subscribeStatus(pax, ride.getId());
 
@@ -948,7 +1098,220 @@ class RideServiceTest {
 
         assertThatThrownBy(() -> rideService.subscribeStatus(outroPax, ride.getId()))
                 .isInstanceOf(RideAccessDeniedException.class);
-        verify(statusSseHub, never()).register(any());
+        verify(statusSseHub, never()).register(any(), any());
+    }
+
+    // ------------------------------------------------------------------------
+    // Pagamento em dinheiro (RF09)
+    // ------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("confirm-payment DINHEIRO com troco valido → PENDING e changeFor gravado")
+    void confirmCashWithChange() {
+        Ride ride = ridePending(pax.userId());
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        RideResponse resp = rideService.confirmPayment(pax, ride.getId(),
+                new ConfirmPaymentRequest(PaymentMethod.DINHEIRO, new BigDecimal("50.00")));
+
+        assertThat(resp.paymentStatus()).isEqualTo(PaymentStatus.PENDING);
+        assertThat(resp.cashChangeFor()).isEqualByComparingTo("50.00");
+        assertThat(resp.pixPayload()).isNull();
+    }
+
+    @Test
+    @DisplayName("confirm-payment PIX → SIMULATED (nunca pago)")
+    void confirmPixIsSimulated() {
+        Ride ride = ridePending(pax.userId());
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+        when(paymentService.generatePixPayload(any(), any())).thenReturn("payload");
+
+        RideResponse resp = rideService.confirmPayment(pax, ride.getId(), new ConfirmPaymentRequest(PaymentMethod.PIX));
+
+        assertThat(resp.paymentStatus()).isEqualTo(PaymentStatus.SIMULATED);
+    }
+
+    @Test
+    @DisplayName("confirm-payment: troco menor que o preco → 400, corrida continua pendente")
+    void changeBelowPriceRejected() {
+        Ride ride = ridePending(pax.userId());
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        assertThatThrownBy(() -> rideService.confirmPayment(pax, ride.getId(),
+                new ConfirmPaymentRequest(PaymentMethod.DINHEIRO, new BigDecimal("1.00"))))
+                .isInstanceOf(InvalidCashPaymentException.class);
+        assertThat(ride.getStatus()).isEqualTo(RideStatus.PENDING_PAYMENT);
+    }
+
+    @Test
+    @DisplayName("confirm-payment: troco com PIX → 400")
+    void changeWithPixRejected() {
+        Ride ride = ridePending(pax.userId());
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        assertThatThrownBy(() -> rideService.confirmPayment(pax, ride.getId(),
+                new ConfirmPaymentRequest(PaymentMethod.PIX, new BigDecimal("50.00"))))
+                .isInstanceOf(InvalidCashPaymentException.class);
+    }
+
+    @Test
+    @DisplayName("cash-payment: recebeu o valor → CONFIRMED com valor e horario")
+    void cashPaymentConfirmed() {
+        Ride ride = completedCashRide();
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        RideResponse resp = rideService.confirmCashPayment(mot, ride.getId(),
+                new CashPaymentRequest(ride.getPreco(), null));
+
+        assertThat(resp.paymentStatus()).isEqualTo(PaymentStatus.CONFIRMED);
+        assertThat(resp.cashReceivedAmount()).isEqualByComparingTo(ride.getPreco());
+        assertThat(resp.paymentConfirmedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("cash-payment: recebeu menos e explicou → DIVERGENT")
+    void cashPaymentDivergentWithNote() {
+        Ride ride = completedCashRide();
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        RideResponse resp = rideService.confirmCashPayment(mot, ride.getId(),
+                new CashPaymentRequest(BigDecimal.ZERO, "  Passageiro saiu sem pagar  "));
+
+        assertThat(resp.paymentStatus()).isEqualTo(PaymentStatus.DIVERGENT);
+        assertThat(resp.paymentNote()).isEqualTo("Passageiro saiu sem pagar");
+    }
+
+    @Test
+    @DisplayName("cash-payment: recebeu menos sem explicar → 400, nada gravado")
+    void cashPaymentDivergentRequiresNote() {
+        Ride ride = completedCashRide();
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        assertThatThrownBy(() -> rideService.confirmCashPayment(mot, ride.getId(),
+                new CashPaymentRequest(new BigDecimal("1.00"), " ")))
+                .isInstanceOf(InvalidCashPaymentException.class);
+        assertThat(ride.getPaymentStatus()).isEqualTo(PaymentStatus.PENDING);
+    }
+
+    @Test
+    @DisplayName("cash-payment: corrida ainda em andamento → 409")
+    void cashPaymentBeforeCompletion() {
+        Ride ride = rideInProgress(pax.userId(), mot.userId());
+        ride.setPaymentMethod(PaymentMethod.DINHEIRO);
+        ride.setPaymentStatus(PaymentStatus.PENDING);
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        assertThatThrownBy(() -> rideService.confirmCashPayment(mot, ride.getId(),
+                new CashPaymentRequest(new BigDecimal("20.00"), null)))
+                .isInstanceOf(CashPaymentNotAllowedException.class);
+    }
+
+    @Test
+    @DisplayName("cash-payment: corrida Pix → 409")
+    void cashPaymentOnPixRide() {
+        Ride ride = completedCashRide();
+        ride.setPaymentMethod(PaymentMethod.PIX);
+        ride.setPaymentStatus(PaymentStatus.SIMULATED);
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        assertThatThrownBy(() -> rideService.confirmCashPayment(mot, ride.getId(),
+                new CashPaymentRequest(new BigDecimal("20.00"), null)))
+                .isInstanceOf(CashPaymentNotAllowedException.class);
+    }
+
+    @Test
+    @DisplayName("cash-payment: segundo registro → 409 (registro unico)")
+    void cashPaymentOnlyOnce() {
+        Ride ride = completedCashRide();
+        ride.setPaymentStatus(PaymentStatus.CONFIRMED);
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        assertThatThrownBy(() -> rideService.confirmCashPayment(mot, ride.getId(),
+                new CashPaymentRequest(new BigDecimal("20.00"), null)))
+                .isInstanceOf(CashPaymentNotAllowedException.class);
+    }
+
+    @Test
+    @DisplayName("cash-payment: motorista que nao aceitou a corrida → 403")
+    void cashPaymentByOtherDriver() {
+        Ride ride = completedCashRide();
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+        AuthenticatedUser outroMot = new AuthenticatedUser(UUID.randomUUID(), "o@x.com", Role.MOTORISTA, CIDADE);
+
+        assertThatThrownBy(() -> rideService.confirmCashPayment(outroMot, ride.getId(),
+                new CashPaymentRequest(new BigDecimal("20.00"), null)))
+                .isInstanceOf(RideAccessDeniedException.class);
+    }
+
+    private Ride completedCashRide() {
+        Ride r = rideInProgress(pax.userId(), mot.userId());
+        r.setStatus(RideStatus.COMPLETED);
+        r.setCompletedAt(Instant.now());
+        r.setPaymentMethod(PaymentMethod.DINHEIRO);
+        r.setPaymentStatus(PaymentStatus.PENDING);
+        return r;
+    }
+
+    // ------------------------------------------------------------------------
+    // GPS: ordem, precisao e minimizacao
+    // ------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("driver-location: posicao com recordedAt anterior a atual e ignorada (rede fora de ordem)")
+    void outOfOrderLocationIsIgnored() {
+        Ride ride = rideEnRoute(pax.userId(), mot.userId());
+        Instant current = Instant.now().minusSeconds(5);
+        ride.setDriverCurrentLat(new BigDecimal("-20.82100"));
+        ride.setDriverCurrentLng(new BigDecimal("-49.37900"));
+        ride.setDriverLocationUpdatedAt(current);
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        RideResponse resp = rideService.updateDriverLocation(mot, ride.getId(), new UpdateDriverLocationRequest(
+                new BigDecimal("-20.82200"), new BigDecimal("-49.38000"), current.minusSeconds(10), null));
+
+        assertThat(resp.driverCurrentLat()).isEqualByComparingTo("-20.82100");
+        assertThat(ride.getDriverLocationUpdatedAt()).isEqualTo(current);
+    }
+
+    @Test
+    @DisplayName("driver-location: grava o instante do GPS e a precisao reportada")
+    void acceptedLocationStoresFixTimeAndAccuracy() {
+        Ride ride = rideEnRoute(pax.userId(), mot.userId());
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+        Instant fix = Instant.now().minusSeconds(3);
+
+        rideService.updateDriverLocation(mot, ride.getId(), new UpdateDriverLocationRequest(
+                new BigDecimal("-20.82100"), new BigDecimal("-49.37900"), fix, new BigDecimal("12.5")));
+
+        assertThat(ride.getDriverLocationUpdatedAt()).isEqualTo(fix);
+        assertThat(ride.getDriverLocationAccuracyM()).isEqualByComparingTo("12.5");
+    }
+
+    @Test
+    @DisplayName("driver-location: precisao ruim → InvalidDriverLocationException, posicao intacta")
+    void inaccurateLocationIsRejected() {
+        Ride ride = rideEnRoute(pax.userId(), mot.userId());
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        assertThatThrownBy(() -> rideService.updateDriverLocation(mot, ride.getId(), new UpdateDriverLocationRequest(
+                new BigDecimal("-20.82100"), new BigDecimal("-49.37900"), null, new BigDecimal("500"))))
+                .isInstanceOf(InvalidDriverLocationException.class);
+        assertThat(ride.getDriverCurrentLat()).isNull();
+    }
+
+    @Test
+    @DisplayName("complete: apaga a posicao do motorista (minimizacao LGPD)")
+    void completeClearsDriverLocation() {
+        Ride ride = rideInProgress(pax.userId(), mot.userId());
+        ride.setDriverCurrentLat(new BigDecimal("-20.82100"));
+        ride.setDriverCurrentLng(new BigDecimal("-49.37900"));
+        ride.setDriverLocationUpdatedAt(Instant.now());
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        RideResponse resp = rideService.complete(mot, ride.getId());
+
+        assertThat(resp.driverCurrentLat()).isNull();
+        assertThat(ride.getDriverLocationUpdatedAt()).isNull();
     }
 
     // ------------------------------------------------------------------------

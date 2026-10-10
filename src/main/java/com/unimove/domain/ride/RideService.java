@@ -1,5 +1,7 @@
 package com.unimove.domain.ride;
 
+import com.unimove.domain.audit.AdminAuditLog;
+import com.unimove.domain.audit.AuditAction;
 import com.unimove.domain.chat.ChatSseHub;
 import com.unimove.domain.maps.GeoPoint;
 import com.unimove.domain.maps.MapsService;
@@ -8,6 +10,7 @@ import com.unimove.domain.payment.PaymentService;
 import com.unimove.domain.ride.dto.AcceptRideRequest;
 import com.unimove.domain.ride.dto.AdminRideItem;
 import com.unimove.domain.ride.dto.CancelRideRequest;
+import com.unimove.domain.ride.dto.CashPaymentRequest;
 import com.unimove.domain.ride.dto.CategoryOption;
 import com.unimove.domain.ride.dto.ConfirmPaymentRequest;
 import com.unimove.domain.ride.dto.CreateRideRequest;
@@ -26,6 +29,7 @@ import com.unimove.domain.ride.dto.RideStatusEvent;
 import com.unimove.domain.ride.dto.StopPoint;
 import com.unimove.domain.ride.dto.SubmitRatingRequest;
 import com.unimove.domain.ride.dto.UpdateDriverLocationRequest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import com.unimove.domain.user.DriverService;
@@ -35,6 +39,7 @@ import com.unimove.domain.user.UserAccountService;
 import com.unimove.domain.user.UserRatingService;
 import com.unimove.domain.user.VehicleType;
 import com.unimove.shared.security.AuthenticatedUser;
+import com.unimove.shared.util.CityNormalizer;
 import com.unimove.shared.util.Haversine;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,6 +58,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 @Service
 public class RideService {
@@ -84,6 +90,8 @@ public class RideService {
     private final ChatSseHub chatSseHub;
     private final RideStatusSseHub statusSseHub;
     private final MuralSseHub muralSseHub;
+    private final DriverLocationPolicy driverLocationPolicy;
+    private final AdminAuditLog auditLog;
 
     public RideService(RideRepository rideRepository,
                        RideRatingRepository rideRatingRepository,
@@ -97,7 +105,9 @@ public class RideService {
                        UserAccountService userAccountService,
                        ChatSseHub chatSseHub,
                        RideStatusSseHub statusSseHub,
-                       MuralSseHub muralSseHub) {
+                       MuralSseHub muralSseHub,
+                       DriverLocationPolicy driverLocationPolicy,
+                       AdminAuditLog auditLog) {
         this.rideRepository = rideRepository;
         this.rideRatingRepository = rideRatingRepository;
         this.mapsService = mapsService;
@@ -111,6 +121,8 @@ public class RideService {
         this.chatSseHub = chatSseHub;
         this.statusSseHub = statusSseHub;
         this.muralSseHub = muralSseHub;
+        this.driverLocationPolicy = driverLocationPolicy;
+        this.auditLog = auditLog;
     }
 
     // Sem @Transactional de proposito: estimate so toca o OSRM (chamada externa)
@@ -150,8 +162,8 @@ public class RideService {
     public RideResponse create(AuthenticatedUser passageiro, CreateRideRequest req) {
         userAccountService.requireActive(passageiro.userId());
         // Uma corrida ativa por passageiro. Checagem barata no banco ANTES do
-        // round-trip ao OSRM. Como o metodo roda sem transacao, ha uma janela
-        // de corrida entre o exists e o save — aceitavel no MVP.
+        // round-trip ao OSRM. A janela entre o exists e o save (clique duplo) e
+        // fechada pelo indice unico parcial ux_rides_passenger_active (V23).
         if (rideRepository.existsByPassageiroIdAndStatusIn(passageiro.userId(), PASSENGER_ACTIVE_STATUSES)) {
             throw ActiveRideExistsException.forPassenger();
         }
@@ -164,6 +176,11 @@ public class RideService {
         BigDecimal surge = surgePolicy.multiplier(passageiro.cidade(), category);
         BigDecimal preco = applySurge(pricingPolicy.calculate(
                 route.distanciaKm(), route.tempoMin(), category, passageiro.cidade()), surge);
+        if (req.expectedPrice() != null && req.expectedPrice().compareTo(preco) != 0) {
+            log.info("Pedido recusado: preco mudou de {} para {} (passageiro {})",
+                    req.expectedPrice(), preco, passageiro.userId());
+            throw new PriceChangedException(req.expectedPrice(), preco);
+        }
 
         Ride ride = new Ride();
         ride.setPassageiroId(passageiro.userId());
@@ -187,12 +204,30 @@ public class RideService {
         ride.setSurgeMultiplier(surge);
         ride.setStatus(RideStatus.PENDING_PAYMENT);
 
-        Ride saved = rideRepository.save(ride);
+        Ride saved = saveGuardingActiveRide(ride, ActiveRideExistsException::forPassenger);
         log.info("Ride {} criada por passageiro {} (cidade={}, category={}, paradas={}, preco={})",
                 saved.getId(), passageiro.userId(), saved.getCidade(), category,
                 saved.getStops().size(), preco);
 
         return RideResponse.from(saved);
+    }
+
+    /**
+     * Persiste traduzindo a violacao dos indices de corrida ativa unica (V23)
+     * para o mesmo 409 da checagem por exists(). Qualquer outra violacao de
+     * integridade segue para o handler global.
+     */
+    private Ride saveGuardingActiveRide(Ride ride, Supplier<ActiveRideExistsException> conflict) {
+        try {
+            return rideRepository.save(ride);
+        } catch (DataIntegrityViolationException ex) {
+            String detail = String.valueOf(ex.getMostSpecificCause().getMessage());
+            if (detail.contains("ux_rides_passenger_active") || detail.contains("ux_rides_driver_active")) {
+                log.warn("Corrida ativa duplicada barrada pelo banco (ride {}): {}", ride.getId(), detail);
+                throw conflict.get();
+            }
+            throw ex;
+        }
     }
 
     /** Aplica o multiplicador de surge sobre a tarifa base. Compartilhado por estimate e create. */
@@ -231,9 +266,23 @@ public class RideService {
 
         RideStateMachine.assertCanTransition(ride.getStatus(), RideStatus.AVAILABLE_IN_MURAL);
 
+        if (req.changeFor() != null) {
+            if (req.method() != PaymentMethod.DINHEIRO) {
+                throw new InvalidCashPaymentException("Troco só se aplica a pagamento em dinheiro.");
+            }
+            if (req.changeFor().compareTo(ride.getPreco()) < 0) {
+                throw new InvalidCashPaymentException(
+                        "O valor para troco precisa cobrir o preço da corrida (R$ " + ride.getPreco() + ").");
+            }
+        }
+
         ride.setPaymentMethod(req.method());
         if (req.method() == PaymentMethod.PIX) {
             ride.setPixPayload(paymentService.generatePixPayload(ride.getId(), ride.getPreco()));
+            ride.setPaymentStatus(PaymentStatus.SIMULATED);
+        } else {
+            ride.setCashChangeFor(req.changeFor());
+            ride.setPaymentStatus(PaymentStatus.PENDING);
         }
         ride.setStatus(RideStatus.AVAILABLE_IN_MURAL);
 
@@ -308,7 +357,7 @@ public class RideService {
         // otimista @Version vale no UPDATE ... WHERE version=?: se outro motorista
         // aceitou primeiro, o save() lanca ObjectOptimisticLockingFailureException
         // (→ 409) e o publishStatus abaixo nem chega a rodar.
-        rideRepository.save(ride);
+        saveGuardingActiveRide(ride, ActiveRideExistsException::forDriver);
 
         log.info("Ride {} aceita pelo motorista {} (pickupEtaMin={})",
                 ride.getId(), motorista.userId(), ride.getPickupEtaMin());
@@ -352,9 +401,50 @@ public class RideService {
         RideStateMachine.assertCanTransition(ride.getStatus(), RideStatus.COMPLETED);
         ride.setStatus(RideStatus.COMPLETED);
         ride.setCompletedAt(Instant.now());
+        clearDriverLocation(ride);
         log.info("Ride {} finalizada pelo motorista {}", ride.getId(), motorista.userId());
         chatSseHub.closeRide(rideId);
         publishStatus(ride);
+        return RideResponse.from(ride);
+    }
+
+    /**
+     * Motorista registra o dinheiro recebido apos concluir a corrida. Valor
+     * menor que o preco vira DIVERGENT (com observacao obrigatoria) e entra na
+     * fila de conciliacao do admin; nunca e tratado como pagamento eletronico.
+     * Registro unico: corrigir depois e tarefa do admin.
+     */
+    @Transactional
+    public RideResponse confirmCashPayment(AuthenticatedUser motorista, UUID rideId, CashPaymentRequest req) {
+        Ride ride = loadAsAcceptingDriver(motorista, rideId);
+        if (ride.getStatus() != RideStatus.COMPLETED) {
+            throw new CashPaymentNotAllowedException("O recebimento só é registrado após concluir a corrida.");
+        }
+        if (ride.getPaymentMethod() != PaymentMethod.DINHEIRO) {
+            throw new CashPaymentNotAllowedException("Esta corrida não foi paga em dinheiro.");
+        }
+        if (ride.getPaymentStatus() != PaymentStatus.PENDING) {
+            throw new CashPaymentNotAllowedException("O recebimento desta corrida já foi registrado.");
+        }
+
+        String note = trimToNull(req.note());
+        boolean divergent = req.receivedAmount().compareTo(ride.getPreco()) < 0;
+        if (divergent && note == null) {
+            throw new InvalidCashPaymentException(
+                    "Valor abaixo do preço da corrida: descreva o ocorrido em 'note'.");
+        }
+
+        ride.setCashReceivedAmount(req.receivedAmount());
+        ride.setPaymentNote(note);
+        ride.setPaymentConfirmedAt(Instant.now());
+        ride.setPaymentStatus(divergent ? PaymentStatus.DIVERGENT : PaymentStatus.CONFIRMED);
+
+        if (divergent) {
+            log.warn("Ride {}: dinheiro divergente (preco={}, recebido={})",
+                    rideId, ride.getPreco(), req.receivedAmount());
+        } else {
+            log.info("Ride {}: dinheiro recebido confirmado pelo motorista {}", rideId, motorista.userId());
+        }
         return RideResponse.from(ride);
     }
 
@@ -370,12 +460,17 @@ public class RideService {
             if (!ride.getPassageiroId().equals(user.userId())) {
                 throw new RideAccessDeniedException();
             }
+            if (ride.getStatus() == RideStatus.IN_PROGRESS) {
+                throw new PassengerCannotCancelInProgressException();
+            }
             ride.setCancelledBy(CancelledBy.PASSAGEIRO);
         } else if (user.role() == Role.MOTORISTA) {
             if (!user.userId().equals(ride.getMotoristaId())) {
                 throw new RideAccessDeniedException();
             }
-            if (ride.getStatus() != RideStatus.DRIVER_EN_ROUTE) {
+            // Em andamento tambem: pane, passageiro desistiu no caminho. Sempre
+            // com motivo, sem taxa (CancellationPolicy so cobra passageiro).
+            if (ride.getStatus() != RideStatus.DRIVER_EN_ROUTE && ride.getStatus() != RideStatus.IN_PROGRESS) {
                 throw new IllegalRideTransitionException(ride.getStatus(), RideStatus.CANCELLED);
             }
             if (reason == null || reason.isBlank()) {
@@ -394,6 +489,7 @@ public class RideService {
         ride.setCancelledAt(now);
         ride.setCancelReason(reason);
         ride.setCancellationFee(fee.signum() > 0 ? fee : null);
+        clearDriverLocation(ride);
 
         log.info("Ride {} cancelada por {} (role={}, fee={})",
                 ride.getId(), user.userId(), user.role(), ride.getCancellationFee());
@@ -416,9 +512,16 @@ public class RideService {
             throw new LocationUpdateNotAllowedException(s);
         }
 
-        ride.setDriverCurrentLat(req.lat());
-        ride.setDriverCurrentLng(req.lng());
-        ride.setDriverLocationUpdatedAt(Instant.now());
+        Instant now = Instant.now();
+        if (driverLocationPolicy.evaluate(ride, req, now) == DriverLocationPolicy.Decision.ACCEPT) {
+            ride.setDriverCurrentLat(req.lat());
+            ride.setDriverCurrentLng(req.lng());
+            ride.setDriverLocationUpdatedAt(driverLocationPolicy.fixTime(req, now));
+            ride.setDriverLocationAccuracyM(req.accuracyM());
+        } else {
+            log.debug("Posicao fora de ordem ignorada na ride {} (fix {} <= atual {})",
+                    rideId, req.recordedAt(), ride.getDriverLocationUpdatedAt());
+        }
 
         return RideResponse.from(ride, computeDriverDistanceKm(ride));
     }
@@ -492,7 +595,7 @@ public class RideService {
                 .orElseThrow(RideNotFoundException::new);
         assertParticipant(user, ride);
 
-        SseEmitter emitter = statusSseHub.register(rideId);
+        SseEmitter emitter = statusSseHub.register(rideId, user.userId());
         RideStatusEvent snapshot = RideStatusEvent.from(ride);
         try {
             emitter.send(RideStatusSseHub.buildEvent(snapshot));
@@ -519,7 +622,7 @@ public class RideService {
                 driverService.getVehicleType(motorista.userId()));
         List<RideMuralItem> snapshot = rideRepository.findMural(motorista.cidade(), category);
 
-        SseEmitter emitter = muralSseHub.register(motorista.cidade(), category);
+        SseEmitter emitter = muralSseHub.register(motorista.cidade(), category, motorista.userId());
         try {
             emitter.send(MuralSseHub.snapshotEvent(snapshot));
         } catch (IOException e) {
@@ -529,8 +632,51 @@ public class RideService {
     }
 
     @Transactional(readOnly = true)
-    public Page<AdminRideItem> listAdminRides(Pageable pageable) {
-        return rideRepository.findAllForAdmin(pageable);
+    public Page<AdminRideItem> listAdminRides(PaymentStatus paymentStatus, RideStatus status, String cidade,
+                                              LocalDate from, LocalDate to, Pageable pageable) {
+        // Periodo sempre definido (sem IS NULL em timestamp): ausente = sem limite.
+        Instant fromInstant = from == null ? Instant.EPOCH : from.atStartOfDay(ZoneOffset.UTC).toInstant();
+        Instant toInstant = to == null
+                ? Instant.parse("9999-12-31T00:00:00Z")
+                : to.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant();
+        String city = cidade == null || cidade.isBlank() ? null : CityNormalizer.normalize(cidade);
+        return rideRepository.findAllForAdmin(paymentStatus, status, city, fromInstant, toInstant, pageable);
+    }
+
+    /** Detalhe completo para o admin investigar disputa — sem regra de participante. */
+    @Transactional(readOnly = true)
+    public RideResponse getForAdmin(UUID rideId) {
+        Ride ride = rideRepository.findById(rideId).orElseThrow(RideNotFoundException::new);
+        return RideResponse.from(ride, computeDriverDistanceKm(ride));
+    }
+
+    /**
+     * Cancelamento administrativo: destrava corrida em qualquer estado nao
+     * terminal (ex.: motorista sumiu em IN_PROGRESS). Sem taxa, com motivo e
+     * auditado na mesma transacao.
+     */
+    @Transactional
+    public RideResponse cancelByAdmin(UUID rideId, UUID adminId, String reason) {
+        Ride ride = rideRepository.findById(rideId).orElseThrow(RideNotFoundException::new);
+        RideStatus statusBefore = ride.getStatus();
+        RideStateMachine.assertCanTransition(statusBefore, RideStatus.CANCELLED);
+
+        ride.setStatus(RideStatus.CANCELLED);
+        ride.setCancelledAt(Instant.now());
+        ride.setCancelledBy(CancelledBy.ADMIN);
+        ride.setCancelReason(reason.trim());
+        ride.setCancellationFee(null);
+        clearDriverLocation(ride);
+        auditLog.record(adminId, AuditAction.RIDE_CANCELLED, "RIDE", rideId,
+                "status=" + statusBefore + " motivo=" + reason.trim());
+
+        log.warn("Ride {} cancelada pelo admin {} (estava {})", rideId, adminId, statusBefore);
+        chatSseHub.closeRide(rideId);
+        publishStatus(ride);
+        if (statusBefore == RideStatus.AVAILABLE_IN_MURAL) {
+            publishMuralRemoved(ride, MuralSseHub.REASON_CANCELLED);
+        }
+        return RideResponse.from(ride);
     }
 
     @Transactional
@@ -705,6 +851,17 @@ public class RideService {
         return t.isEmpty() ? null : t;
     }
 
+    /**
+     * Minimizacao (LGPD): encerrada a corrida, a posicao do motorista nao tem
+     * mais finalidade para o passageiro nem para o link compartilhado.
+     */
+    private static void clearDriverLocation(Ride ride) {
+        ride.setDriverCurrentLat(null);
+        ride.setDriverCurrentLng(null);
+        ride.setDriverLocationUpdatedAt(null);
+        ride.setDriverLocationAccuracyM(null);
+    }
+
     private Ride loadAsAcceptingDriver(AuthenticatedUser motorista, UUID rideId) {
         Ride ride = rideRepository.findById(rideId)
                 .orElseThrow(RideNotFoundException::new);
@@ -747,6 +904,12 @@ public class RideService {
         Instant toInstantExclusive = effectiveTo.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant();
 
         EarningsAggregate agg = rideRepository.sumDriverEarnings(driverId, fromInstant, toInstantExclusive);
+        EarningsResponse.PaymentBreakdown payments = agg == null
+                ? new EarningsResponse.PaymentBreakdown(BigDecimal.ZERO, BigDecimal.ZERO, 0, BigDecimal.ZERO)
+                : new EarningsResponse.PaymentBreakdown(
+                        orZero(agg.cashReceived()), orZero(agg.cashPending()),
+                        agg.cashDivergentRides() == null ? 0 : agg.cashDivergentRides(),
+                        orZero(agg.pixSimulated()));
         long total = agg == null ? 0L : agg.totalRides();
         BigDecimal gross = (agg == null || agg.grossEarnings() == null)
                 ? BigDecimal.ZERO
@@ -765,6 +928,10 @@ public class RideService {
                 ))
                 .toList();
 
-        return new EarningsResponse(effectiveFrom, effectiveTo, total, gross, average, byDay);
+        return new EarningsResponse(effectiveFrom, effectiveTo, total, gross, average, byDay, payments);
+    }
+
+    private static BigDecimal orZero(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value;
     }
 }

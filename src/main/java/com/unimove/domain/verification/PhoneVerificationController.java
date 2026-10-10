@@ -2,6 +2,7 @@ package com.unimove.domain.verification;
 
 import com.unimove.domain.verification.dto.ChallengeResponse;
 import com.unimove.domain.verification.dto.ChallengeStatusResponse;
+import com.unimove.shared.web.ClientIp;
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
@@ -35,7 +36,7 @@ public class PhoneVerificationController {
                     + "mensagem alguma: quem envia é o usuário, e é isso que mantém o custo em zero "
                     + "na Cloud API. Limitado por IP (429 ao estourar).")
     public ResponseEntity<ChallengeResponse> createChallenge(HttpServletRequest request) {
-        ChallengeResponse body = service.createChallenge(clientIp(request));
+        ChallengeResponse body = service.createChallenge(ClientIp.of(request));
         return ResponseEntity.status(HttpStatus.CREATED).body(body);
     }
 
@@ -45,17 +46,5 @@ public class PhoneVerificationController {
                     + "`REJECTED` com `PHONE_IN_USE` significa que o número já tem conta — o caminho é login.")
     public ResponseEntity<ChallengeStatusResponse> getStatus(@PathVariable UUID challengeId) {
         return ResponseEntity.ok(service.getStatus(challengeId));
-    }
-
-    /**
-     * Atras do proxy do Railway o IP real vem em X-Forwarded-For; o primeiro
-     * item da lista e o cliente. Cai para o IP da conexao quando ausente.
-     */
-    private static String clientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            return forwarded.split(",")[0].trim();
-        }
-        return request.getRemoteAddr();
     }
 }

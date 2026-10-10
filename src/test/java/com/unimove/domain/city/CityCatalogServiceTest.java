@@ -20,6 +20,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -33,6 +34,7 @@ class CityCatalogServiceTest {
 
     @Mock ServedCityRepository repository;
     @Mock UserDirectory userDirectory;
+    @Mock com.unimove.domain.audit.AdminAuditLog auditLog;
 
     @InjectMocks CityCatalogService service;
 
@@ -103,6 +105,8 @@ class CityCatalogServiceTest {
 
         assertThat(result.created()).isTrue();
         assertThat(result.city().slug()).isEqualTo("casa-nova-ba");
+        verify(auditLog).record(ADMIN_ID, com.unimove.domain.audit.AuditAction.CITY_OPENED,
+                "CITY", "casa-nova-ba", "nova");
     }
 
     @Test
@@ -127,6 +131,7 @@ class CityCatalogServiceTest {
                 .isInstanceOf(InvalidCityNameException.class);
 
         verify(repository, never()).save(any());
+        verifyNoInteractions(auditLog);
     }
 
     @Test
@@ -138,6 +143,8 @@ class CityCatalogServiceTest {
         service.deactivate(ADMIN_ID, "Casa Nova/BA");
 
         assertThat(existing.isActive()).isFalse();
+        verify(auditLog).record(ADMIN_ID, com.unimove.domain.audit.AuditAction.CITY_DEACTIVATED,
+                "CITY", "casa-nova-ba", null);
     }
 
     @Test

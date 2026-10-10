@@ -2,6 +2,7 @@ package com.unimove.domain.ride.dto;
 
 import com.unimove.domain.ride.CancelledBy;
 import com.unimove.domain.ride.PaymentMethod;
+import com.unimove.domain.ride.PaymentStatus;
 import com.unimove.domain.ride.Ride;
 import com.unimove.domain.ride.RideCategory;
 import com.unimove.domain.ride.RideStatus;
@@ -29,6 +30,11 @@ public record RideResponse(
         RideStatus status,
         PaymentMethod paymentMethod,
         String pixPayload,
+        PaymentStatus paymentStatus,
+        BigDecimal cashChangeFor,
+        BigDecimal cashReceivedAmount,
+        Instant paymentConfirmedAt,
+        String paymentNote,
         BigDecimal driverCurrentLat,
         BigDecimal driverCurrentLng,
         Instant driverLocationUpdatedAt,
@@ -79,6 +85,11 @@ public record RideResponse(
                 r.getStatus(),
                 r.getPaymentMethod(),
                 r.getPixPayload(),
+                r.getPaymentStatus(),
+                r.getCashChangeFor(),
+                r.getCashReceivedAmount(),
+                r.getPaymentConfirmedAt(),
+                r.getPaymentNote(),
                 r.getDriverCurrentLat(),
                 r.getDriverCurrentLng(),
                 r.getDriverLocationUpdatedAt(),

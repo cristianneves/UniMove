@@ -1,5 +1,8 @@
 package com.unimove.domain.user;
 
+import com.unimove.domain.audit.AdminAuditLog;
+import com.unimove.domain.audit.AuditAction;
+import com.unimove.domain.user.document.DriverDocumentService;
 import com.unimove.domain.user.dto.DriverPublicInfo;
 import com.unimove.domain.user.dto.DriverStatusResponse;
 import com.unimove.domain.user.dto.PendingDriverItem;
@@ -9,7 +12,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
-import java.util.List;
+import java.time.LocalDate;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -21,13 +26,19 @@ public class DriverService {
     private final DriverRepository driverRepository;
     private final UserRepository userRepository;
     private final UserAccountService userAccountService;
+    private final AdminAuditLog auditLog;
+    private final DriverDocumentService documentService;
 
     public DriverService(DriverRepository driverRepository,
                          UserRepository userRepository,
-                         UserAccountService userAccountService) {
+                         UserAccountService userAccountService,
+                         AdminAuditLog auditLog,
+                         DriverDocumentService documentService) {
         this.driverRepository = driverRepository;
         this.userRepository = userRepository;
         this.userAccountService = userAccountService;
+        this.auditLog = auditLog;
+        this.documentService = documentService;
     }
 
     @Transactional(readOnly = true)
@@ -50,9 +61,7 @@ public class DriverService {
         userAccountService.requireActive(userId);
         Driver d = driverRepository.findById(userId)
                 .orElseThrow(DriverNotFoundException::new);
-        if (!d.isApproved()) {
-            throw new DriverNotApprovedException();
-        }
+        assertOperational(d);
         d.setOnline(true);
         d.setLastSeenAt(Instant.now());
         log.info("Driver {} → online", userId);
@@ -67,6 +76,20 @@ public class DriverService {
         d.setLastSeenAt(Instant.now());
         log.info("Driver {} → offline", userId);
         return DriverStatusResponse.from(d);
+    }
+
+    /**
+     * Aprovado pelo admin E com CNH valida hoje. A CNH vence com o motorista ja
+     * aprovado; motorista aprovado antes do RF02 nao tem CNH cadastrada — os
+     * dois casos ficam fora de operacao ate atualizar a documentacao.
+     */
+    private static void assertOperational(Driver d) {
+        if (!d.isApproved()) {
+            throw new DriverNotApprovedException();
+        }
+        if (!d.hasValidCnh(LocalDate.now(DriverDocumentService.BRAZIL))) {
+            throw new DriverDocumentationInvalidException();
+        }
     }
 
     @Transactional
@@ -88,9 +111,7 @@ public class DriverService {
     public void assertCanAcceptRides(UUID userId) {
         Driver d = driverRepository.findById(userId)
                 .orElseThrow(DriverNotFoundException::new);
-        if (!d.isApproved()) {
-            throw new DriverNotApprovedException();
-        }
+        assertOperational(d);
         if (!d.isOnline()) {
             throw new DriverOfflineException();
         }
@@ -110,16 +131,21 @@ public class DriverService {
     }
 
     @Transactional(readOnly = true)
-    public List<PendingDriverItem> listPending() {
-        return driverRepository.findPending();
+    public Page<PendingDriverItem> listPending(Pageable pageable) {
+        return driverRepository.findPending(pageable).map(d -> new PendingDriverItem(
+                d.getUserId(), d.getUser().getName(), d.getUser().getEmail(), d.getUser().getPhone(),
+                d.getUser().getCidade(), d.getVehicleType(), d.getVehiclePlate(), d.getUser().getCreatedAt(),
+                documentService.statusOf(d)));
     }
 
     @Transactional
-    public DriverStatusResponse approve(UUID userId) {
+    public DriverStatusResponse approve(UUID userId, UUID adminId) {
         Driver d = driverRepository.findById(userId)
                 .orElseThrow(DriverNotFoundException::new);
+        documentService.assertReadyForApproval(userId);
         d.setApproved(true);
-        log.info("Driver {} aprovado pelo admin", userId);
+        auditLog.record(adminId, AuditAction.DRIVER_APPROVED, "USER", userId, null);
+        log.info("Driver {} aprovado pelo admin {}", userId, adminId);
         return DriverStatusResponse.from(d);
     }
 }

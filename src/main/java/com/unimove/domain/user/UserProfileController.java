@@ -1,6 +1,8 @@
 package com.unimove.domain.user;
 
+import com.unimove.domain.user.dto.AuthResponse;
 import com.unimove.domain.user.dto.ChangePasswordRequest;
+import com.unimove.domain.user.dto.ChangePhoneRequest;
 import com.unimove.domain.user.dto.UpdateProfileRequest;
 import com.unimove.domain.user.dto.UpdateProfileResponse;
 import com.unimove.domain.user.dto.UserProfileResponse;
@@ -47,12 +49,21 @@ public class UserProfileController {
         return userProfileService.updateProfile(user, req);
     }
 
+    @PutMapping("/phone")
+    @Operation(summary = "Troca o telefone",
+            description = "Faça antes o desafio do WhatsApp com o número novo (POST /auth/phone/challenge) e envie "
+                    + "o `verificationToken`. 409 se o número já pertence a outra conta.")
+    public UserProfileResponse changePhone(@AuthenticationPrincipal AuthenticatedUser user,
+                                           @Valid @RequestBody ChangePhoneRequest req) {
+        return userProfileService.changePhone(user, req.verificationToken());
+    }
+
     @PutMapping("/password")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
     @Operation(summary = "Troca a senha do usuário autenticado",
-            description = "Exige a senha atual. Retorna 400 se a senha atual estiver incorreta.")
-    public void changePassword(@AuthenticationPrincipal AuthenticatedUser user,
-                               @Valid @RequestBody ChangePasswordRequest req) {
-        userProfileService.changePassword(user, req.currentPassword(), req.newPassword());
+            description = "Exige a senha atual (400 se incorreta). Revoga todos os tokens anteriores e devolve "
+                    + "um novo em `token` — o app deve substituí-lo. Também encerra a senha temporária do reset.")
+    public AuthResponse changePassword(@AuthenticationPrincipal AuthenticatedUser user,
+                                       @Valid @RequestBody ChangePasswordRequest req) {
+        return userProfileService.changePassword(user, req.currentPassword(), req.newPassword());
     }
 }

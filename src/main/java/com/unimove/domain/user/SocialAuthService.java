@@ -46,6 +46,7 @@ public class SocialAuthService {
     private final PhoneVerificationService phoneVerificationService;
     private final JwtService jwtService;
     private final CityCatalog cityCatalog;
+    private final PrivacyProperties privacy;
     private final Clock clock;
 
     public SocialAuthService(List<SocialIdentityVerifier> verifiers,
@@ -55,6 +56,7 @@ public class SocialAuthService {
                              PhoneVerificationService phoneVerificationService,
                              JwtService jwtService,
                              CityCatalog cityCatalog,
+                             PrivacyProperties privacy,
                              Clock clock) {
         verifiers.forEach(v -> this.verifiers.put(v.provider(), v));
         this.userRepository = userRepository;
@@ -63,6 +65,7 @@ public class SocialAuthService {
         this.phoneVerificationService = phoneVerificationService;
         this.jwtService = jwtService;
         this.cityCatalog = cityCatalog;
+        this.privacy = privacy;
         this.clock = clock;
     }
 
@@ -117,12 +120,17 @@ public class SocialAuthService {
             throw new InvalidCityException();
         }
         cityCatalog.assertServed(cidade);
+        if (!privacy.termsVersion().equals(req.termsVersion())) {
+            throw new TermsNotAcceptedException(privacy.termsVersion());
+        }
 
         // Mesma transacao do cadastro: se algo falhar adiante, o rollback
         // devolve o token de verificacao e o usuario nao refaz o WhatsApp.
         String verifiedPhone = phoneVerificationService.consumeVerifiedPhone(req.verificationToken());
 
         User user = new User();
+        user.setTermsVersion(req.termsVersion());
+        user.setTermsAcceptedAt(clock.instant());
         user.setEmail(identity.email());
         user.setPasswordHash(null); // conta so-social; ganha senha depois via reset do admin
         user.setName(displayName(identity));

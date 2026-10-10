@@ -17,8 +17,10 @@ public final class RideStateMachine {
                 EnumSet.of(RideStatus.DRIVER_EN_ROUTE, RideStatus.CANCELLED, RideStatus.EXPIRED));
         ALLOWED.put(RideStatus.DRIVER_EN_ROUTE,
                 EnumSet.of(RideStatus.IN_PROGRESS, RideStatus.CANCELLED));
+        // Cancelar em andamento: so motorista (com motivo) ou admin — a regra
+        // de quem pode fica no RideService; aqui so a transicao.
         ALLOWED.put(RideStatus.IN_PROGRESS,
-                EnumSet.of(RideStatus.COMPLETED));
+                EnumSet.of(RideStatus.COMPLETED, RideStatus.CANCELLED));
         ALLOWED.put(RideStatus.COMPLETED, EnumSet.noneOf(RideStatus.class));
         ALLOWED.put(RideStatus.CANCELLED, EnumSet.noneOf(RideStatus.class));
         ALLOWED.put(RideStatus.EXPIRED, EnumSet.noneOf(RideStatus.class));

@@ -27,7 +27,9 @@ public record SocialRegisterRequest(
         @NotNull Role role,
         @NotBlank @Size(max = 80) String cidade,
         VehicleType vehicleType,
-        @Size(max = 10) String vehiclePlate
+        @Size(max = 10) String vehiclePlate,
+        /** Versao dos termos/politica aceita na tela de cadastro (GET /legal/terms). */
+        @NotBlank @Size(max = 20) String termsVersion
 ) {
     @AssertTrue(message = "Cadastro permitido apenas para PASSAGEIRO ou MOTORISTA.")
     public boolean isRoleSelfRegisterable() {

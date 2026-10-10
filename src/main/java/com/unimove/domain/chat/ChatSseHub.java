@@ -1,6 +1,7 @@
 package com.unimove.domain.chat;
 
 import com.unimove.domain.chat.dto.ChatMessageResponse;
+import com.unimove.shared.web.UserStreamRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -22,6 +23,13 @@ import java.util.concurrent.CopyOnWriteArrayList;
 @Component
 public class ChatSseHub {
 
+    /** Indice por usuario, para derrubar os streams de quem perde o acesso. */
+    private final UserStreamRegistry userStreams;
+
+    public ChatSseHub(UserStreamRegistry userStreams) {
+        this.userStreams = userStreams;
+    }
+
     private static final Logger log = LoggerFactory.getLogger(ChatSseHub.class);
 
     // 30 min de conexao — cliente reconecta com Last-Event-Id.
@@ -29,11 +37,14 @@ public class ChatSseHub {
 
     private final Map<UUID, CopyOnWriteArrayList<SseEmitter>> emittersByRide = new ConcurrentHashMap<>();
 
-    public SseEmitter register(UUID rideId) {
+    public SseEmitter register(UUID rideId, UUID userId) {
         SseEmitter emitter = new SseEmitter(EMITTER_TIMEOUT_MS);
         emittersByRide.computeIfAbsent(rideId, k -> new CopyOnWriteArrayList<>()).add(emitter);
 
+        userStreams.track(userId, emitter);
+
         Runnable remove = () -> {
+            userStreams.untrack(userId, emitter);
             CopyOnWriteArrayList<SseEmitter> list = emittersByRide.get(rideId);
             if (list != null) {
                 list.remove(emitter);

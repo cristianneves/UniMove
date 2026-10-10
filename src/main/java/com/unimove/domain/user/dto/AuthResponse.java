@@ -12,8 +12,14 @@ public record AuthResponse(
         UUID userId,
         Role role,
         String cidade,
-        Instant expiresAt
+        Instant expiresAt,
+        /** true quando a senha e temporaria (reset do admin): o app deve abrir a troca de senha. */
+        boolean mustChangePassword
 ) {
+    public AuthResponse(String token, UUID userId, Role role, String cidade, Instant expiresAt) {
+        this(token, userId, role, cidade, expiresAt, false);
+    }
+
     /** Ponto unico de montagem: cadastro, login e login social devolvem o mesmo corpo. */
     public static AuthResponse of(User user, JwtService.IssuedToken issued) {
         return new AuthResponse(
@@ -21,7 +27,8 @@ public record AuthResponse(
                 user.getId(),
                 user.getRole(),
                 user.getCidade(),
-                issued.expiresAt()
+                issued.expiresAt(),
+                user.isMustChangePassword()
         );
     }
 }
