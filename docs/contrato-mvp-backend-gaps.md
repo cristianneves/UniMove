@@ -127,3 +127,16 @@ O backend usa 3 estados por envio e um consolidado derivado. Não existe `UNDER_
 
 ### Swagger
 - `/swagger-ui.html` e `/v3/api-docs` agora exigem login de **ADMIN** em `/docs/login`. Isso não afeta o app; afeta só quem usa a documentação.
+
+## 9. Quarto ciclo (pendências de backend dos cards, 11/10/2026)
+
+### ⚠️ Mudanças que o app precisa tratar
+11. **Pix nas preferências com o Pix desligado → 400** *"Pix indisponível no momento. Escolha pagamento em dinheiro."* (`PAYMENT_PIX_ENABLED=false`, padrão do piloto). Antes o PUT aceitava e o erro só aparecia no `confirm-payment` (409). O app não deve oferecer Pix nas preferências do piloto.
+
+### Esqueci minha senha (sem sessão e sem admin)
+1. `POST /auth/phone/challenge` com corpo `{"purpose":"PASSWORD_RESET"}` (sem corpo, ou `NEW_PHONE`, segue sendo o desafio de cadastro/troca de número; `purpose` desconhecido → 400).
+2. O usuário envia o código pelo WhatsApp **do número da conta**. Polling em `GET /auth/phone/challenge/{id}`: número sem conta → `REJECTED` com `rejectionReason=PHONE_NOT_REGISTERED`.
+3. `VERIFIED` → `POST /auth/password/reset` com `{"verificationToken","newPassword"}` (senha 8–72) → **204**. As sessões anteriores são revogadas (401 do item 6) e o bloqueio por tentativas de login é zerado. O app segue para o login.
+- Token de recuperação não cadastra conta nem troca telefone, e token de cadastro não redefine senha: os dois casos → 400. Token vencido ou já usado → 400.
+- Conta criada pelo Google (sem senha) ganha senha e passa a entrar das duas formas.
+- O reset pelo admin (`/admin/users/{id}/reset-password`) continua para quem perdeu o número.

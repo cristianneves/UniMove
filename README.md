@@ -110,14 +110,12 @@ com.unimove
 - **Swagger UI:** `http://localhost:8080/swagger-ui.html` — **restrito a ADMIN**: abre a tela de login em `/docs/login` (e-mail/senha de admin, com o mesmo lockout do app; admin com senha temporaria troca no app antes). Para o "Try it out", cole um JWT no botao **Authorize**.
 - **OpenAPI JSON:** `http://localhost:8080/v3/api-docs` (mesma sessao de admin)
 - **Coleção HTTP versionada:** [`docs/api.http`](./docs/api.http) — abre direto no IntelliJ HTTP Client ou VSCode REST Client.
-- **Smoke test ponta-a-ponta:** [`docs/smoke-test.md`](./docs/smoke-test.md) — checklist manual de ~10 min para validar release.
-- **Estado atual:** [`docs/estado-atual-projeto.md`](./docs/estado-atual-projeto.md) — snapshot do que existe e do fluxo ponta-a-ponta.
+- **Smoke test de um ambiente:** `scripts/smoke.sh <url>` (ver *Smoke de um ambiente* acima).
 - **Visão geral e fluxo no Swagger:** [`docs/visao-geral-e-fluxo-swagger.md`](./docs/visao-geral-e-fluxo-swagger.md) — porquê de cada decisão de MVP + roteiro completo.
-- **Painel de métricas (admin):** [`docs/admin-metrics.md`](./docs/admin-metrics.md) — contrato do `GET /admin/metrics`.
 - **Login social:** [`docs/login-social-google.md`](./docs/login-social-google.md) — fluxo de ID Token, vinculação de contas e configuração no Google Cloud.
 - **Login social — guia do app:** [`docs/guia-app-login-google.md`](./docs/guia-app-login-google.md) — passo a passo para o dev mobile: OAuth clients de plataforma, `google_sign_in` e os dois fluxos de tela.
-- **Surge pricing:** [`docs/plano-surge-pricing.md`](./docs/plano-surge-pricing.md) — spec do preço dinâmico por demanda.
-- **Análise/roadmap:** [`docs/analise-mvp.md`](./docs/analise-mvp.md) — lacunas priorizadas para o piloto real.
+- **Go/No-Go do piloto:** [`docs/go-no-go-piloto.md`](./docs/go-no-go-piloto.md) — decisões de escopo, critérios bloqueantes, riscos aceitos e rollback.
+- **Matriz de requisitos:** [`docs/matriz-requisitos-mvp.md`](./docs/matriz-requisitos-mvp.md) — evidência do backend para RF01–RF10 e RNF01–RNF09.
 - **Deploy:** [`docs/deploy.md`](./docs/deploy.md) — Render + Supabase, secrets do GitHub, rollback e limites do plano gratuito.
 - **Homologação / runbook:** [`docs/homologacao-runbook.md`](./docs/homologacao-runbook.md) — checagens antes de aplicar V23–V28, bucket de documentos, smoke autenticado, backup e rollback.
 - **LGPD — inventário de dados:** [`docs/lgpd-inventario-dados.md`](./docs/lgpd-inventario-dados.md) — o que coletamos, por quê, com quem compartilhamos, retenção e como atender o titular.
@@ -221,12 +219,12 @@ Para rodar a stack completa (API + Postgres + TLS) numa VPS propria, o
 
 ## Status do MVP
 
-Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.md` existem e respondem com as roles corretas. Veja `docs/estado-atual-projeto.md` para o diagnostico completo.
+Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.md` existem e respondem com as roles corretas. Pendencias para o piloto em `docs/go-no-go-piloto.md`.
 
 | Bloco                       | Status        | Observacoes |
 |-----------------------------|---------------|-------------|
 | Scaffold (pom, profiles)    | concluido     | Spring Boot 3.3.5 + Java 21 |
-| Schema (`V1`-`V35`)         | concluido     | V33 um unico envio de documento em analise por tipo (indice parcial), V34 pagamento/categoria preferidos, V35 placas normalizadas. V29 revogacao de sessao/senha temporaria, V30 cancelamento admin, V31 CPF/CNH cifrados, V32 notificacoes. V23–V28: corrida ativa unica no banco, precisao do GPS, pagamento em dinheiro, auditoria admin, documentos do motorista, consentimento/exclusao (LGPD). |
+| Schema (`V1`-`V36`)         | concluido     | V36 proposito do desafio de telefone (recuperacao de senha). V33 um unico envio de documento em analise por tipo (indice parcial), V34 pagamento/categoria preferidos, V35 placas normalizadas. V29 revogacao de sessao/senha temporaria, V30 cancelamento admin, V31 CPF/CNH cifrados, V32 notificacoes. V23–V28: corrida ativa unica no banco, precisao do GPS, pagamento em dinheiro, auditoria admin, documentos do motorista, consentimento/exclusao (LGPD). |
 | Schema ate `V22`            | concluido     | served_cities, users (com `status`, `phone_verified_at`, telefone unico e `password_hash` nullable p/ conta social), social_identities, phone_verifications, drivers, rides (com `@Version`, `share_token`, `route_geometry` e `surge_multiplier`), route_cache (com `geometry`), ride_ratings, saved_places, cancellation_fee, category, pricing_configs (com `surge_enabled`/`surge_cap`), chat_messages, ride_stops, geocode_cache |
 | `shared` (security, JWT, exception handler) | concluido | `GlobalExceptionHandler` cobre validacao, JSON ilegivel/enum invalido (400), lock otimista, `BusinessException` |
 | `domain.user`               | concluido     | `/auth/*`, online/offline, admin approve, `/saved-places`, denormalizacao de rating, **suspensao/reativacao via `/admin/users/*`** |
@@ -245,19 +243,19 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 | Taxa de cancelamento        | concluido     | `CancellationPolicy` — R$ 3,00 após 120s de `DRIVER_EN_ROUTE` (passageiro) |
 | Categorias MOTO/CARRO       | concluido     | Matching server-side no mural + accept, coeficientes por categoria |
 | Suspensao de usuario        | concluido     | `POST /admin/users/{id}/suspend|reactivate`; **o filtro JWT consulta o status a cada request**: token de conta suspensa responde 403 na hora (excluida, 401); rota publica segue funcionando |
-| Rate limit                  | concluido     | Login/cadastro/social por IP e `/maps/*` por usuario (429 + `Retry-After`), alem do lockout por e-mail e do teto do desafio do WhatsApp |
+| Rate limit                  | concluido     | Login/cadastro/social/reset de senha por IP e `/maps/*` por usuario (429 + `Retry-After`), alem do lockout por e-mail e do teto do desafio do WhatsApp |
 | Corrida ativa unica         | concluido     | Indices unicos parciais (V23) fecham a janela do clique duplo — passageiro e motorista; violacao vira o mesmo 409 |
 | Sanidade do GPS             | concluido     | `PUT /rides/{id}/driver-location` aceita `recordedAt`/`accuracyM`; 422 para posicao velha, do futuro, imprecisa ou salto impossivel; fora de ordem e ignorada; posicao apagada ao encerrar a corrida |
 | Pagamento em dinheiro       | concluido     | `changeFor` (troco) no `confirm-payment`; `POST /rides/{id}/cash-payment` (motorista registra o recebido; abaixo do preco = `DIVERGENT` com observacao); `paymentStatus` em corrida/historico/mural/admin; filtro `/admin/rides?paymentStatus=`; bloco `payments` em `/admin/metrics`. Pix segue `SIMULATED` — nunca conta como recebido |
 | Cadastro documental (RF02)  | concluido     | `/drivers/me/documentation/*` (CPF/CNH/veiculo + upload CNH/CRLV/selfie) e `/admin/drivers/{id}/documentation|documents/*` (URL assinada auditada, aprovar, reprovar com motivo). `approve` exige documentacao aprovada; online/aceite exige CNH valida. Ver `docs/homologacao-runbook.md` para o bucket |
 | Auditoria admin             | concluido     | `admin_audit_log` (V26) gravado na mesma transacao da acao; `GET /admin/audit?action=&targetId=` |
-| Sessoes e senha             | concluido     | Troca/reset de senha revoga tokens antigos (401) e derruba streams SSE; senha temporaria obriga troca (`mustChangePassword`); admin do seed forcado a trocar |
+| Sessoes e senha             | concluido     | Troca/reset de senha revoga tokens antigos (401) e derruba streams SSE; senha temporaria obriga troca (`mustChangePassword`); admin do seed forcado a trocar. **Esqueci minha senha sem sessao:** desafio do WhatsApp com `purpose=PASSWORD_RESET` (numero precisa ter conta) + `POST /auth/password/reset` → 204 |
 | Admin operacional           | concluido     | Busca de usuarios, fila de documentos pendentes, `/admin/rides` com filtros e detalhe, cancelamento administrativo de corrida |
 | Notificacoes / campanhas    | concluido     | `domain.notification`: campanhas so para quem deu opt-in, segmentadas por cidade/papel, com previa, historico e auditoria; caixa de entrada `GET /notifications` |
 | Retencao LGPD               | concluido     | Job diario anonimiza corridas > 5 anos e apaga arquivos de documento obsoletos > 90 dias |
 | Privacidade (LGPD)          | concluido     | `GET /legal/terms`, `termsVersion` obrigatorio no cadastro, `POST /users/me/terms`, `GET/PUT /users/me/preferences` (opt-in promocional), `GET /users/me/data-export`, `DELETE /users/me` (anonimizacao imediata). Ver `docs/lgpd-inventario-dados.md` |
 | Share publico da viagem     | concluido     | `share_token` em toda ride; o passageiro dono obtem o link em `GET /rides/{id}/share-link` (so com a corrida viva); `GET /share/{token}` publico, 410 ao terminar |
-| Preferencias do pedido      | concluido     | `GET/PUT /users/me/preferences` guarda `preferredPaymentMethod`/`preferredCategory` do passageiro (pre-selecao no app); motorista → 400 |
+| Preferencias do pedido      | concluido     | `GET/PUT /users/me/preferences` guarda `preferredPaymentMethod`/`preferredCategory` do passageiro (pre-selecao no app); motorista → 400; Pix com `PAYMENT_PIX_ENABLED=false` → 400 |
 | Cidades atendidas (whitelist) | concluido   | `served_cities` + `CityCatalog`. `cidade` deixou de ser texto livre: cadastro (comum e social) e `PUT /users/me` so aceitam cidade da lista (400 `"Ainda nao atendemos esta cidade."`). `GET /cities` publico alimenta o seletor do app; ADMIN abre/fecha em runtime por `POST`/`DELETE /admin/cities`, sem deploy. Desativar e **soft**: quem ja opera na cidade continua, ela so some das escolhas novas. Motorista que troca de cidade e derrubado para offline |
 | Tarifa configuravel         | concluido     | `pricing_configs(cidade, category, base, per_km, per_min)` + cache em memoria; ADMIN edita via `PUT /admin/pricing`. **Independente da whitelist**: da pra configurar a tarifa antes de abrir a cidade |
 | Surge pricing (preco dinamico) | concluido  | `SurgePolicy` — multiplicador automatico por demanda/oferta (cidade+categoria), ladder em degraus com teto; opt-in por cidade (`surge_enabled`/`surge_cap`). Congelado em `rides.surge_multiplier` no create; exposto no `estimate` |
@@ -266,13 +264,13 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 | Geometria da rota (mapa)    | concluido     | OSRM `overview=full&geometries=polyline`; `GET /rides/{id}/route`, polyline no estimate/share; `route_geometry` + `route_cache.geometry` |
 | Busca de endereco (geocoding) | concluido   | `GET /maps/geocode` (autocomplete) + `GET /maps/reverse` (pin) via Photon; `reverse` cacheado em `geocode_cache` |
 | OpenAPI / Swagger UI        | concluido     | `springdoc-openapi` em `/swagger-ui.html`, so para ADMIN via login em `/docs/login` (cadeia de seguranca propria com sessao + CSRF; a API segue stateless) |
-| Coleção HTTP / smoke test   | concluido     | `docs/api.http` + `docs/smoke-test.md` |
+| Coleção HTTP / smoke test   | concluido     | `docs/api.http` + `scripts/smoke.sh` |
 
 > **Contrato do cliente ao trocar de cidade:** `PUT /users/me` devolve um `token` novo quando a cidade muda, e o app deve **substituir o JWT e reabrir os streams SSE** (`/rides/mural/stream`, `/rides/{id}/status-stream`, `/chat/rides/{id}/stream`). Todos os tokens anteriores sao revogados (401 `"Sessão encerrada por alteração na conta (senha ou cidade)..."`, inclusive em outros aparelhos) e os streams abertos com eles sao encerrados pelo backend.
 
 ### Testes
 
-Cobertura atual (`mvn test`) — **473 testes unitarios** + **23 de integracao** (`mvn verify` com `IT_DATABASE_URL`). Cards MVP de 10/10/2026: `AuthContractIT` (cadastro real com desafio WhatsApp, token de uso unico, cidade por slug, 401/403), `RideJourneyIT` (jornada passageiro × 2 motoristas × admin com SSE e chat reais, piloto so dinheiro), `ObservabilityIT` (health/probes/info) e `DestructiveMigrationGuardTest` (trava da V19). Go/No-Go do piloto em [`docs/go-no-go-piloto.md`](./docs/go-no-go-piloto.md). Reauditoria de 10/10/2026: `RideIT` (aceite concorrente por dois motoristas → 200/409, clique duplo no pedido, `?sort=` invalido → 400, link de compartilhamento), `DriverDocumentIT` (envio duplicado concorrente → 201/409), `SessionAndDocsIT` (revogacao por troca de cidade, login do Swagger), alem de `RideShareServiceTest`, `DocsAuthenticationProviderTest`, `DocsSecurityWebMvcTest`, `VehiclePlateTest` e `GlobalExceptionHandlerTest`. Segundo ciclo: `NotificationServiceTest`, `FieldCryptoTest`, `FieldCryptoSpringWiringTest`, `CnhTest`, `UserStreamRegistryTest`, `ClientIpTest`, `RideRetentionSchedulerTest`, `DocumentRetentionSchedulerTest`, `AdminRideControllerWebMvcTest` e casos novos nos testes de servico. Primeiro ciclo:
+Cobertura atual (`mvn test`) — **485 testes unitarios** + **24 de integracao** (`mvn verify` com `IT_DATABASE_URL`). Cards MVP de 10/10/2026: `AuthContractIT` (cadastro real com desafio WhatsApp, token de uso unico, cidade por slug, 401/403, recuperacao de senha pelo WhatsApp), `RideJourneyIT` (jornada passageiro × 2 motoristas × admin com SSE e chat reais, piloto so dinheiro), `ObservabilityIT` (health/probes/info) e `DestructiveMigrationGuardTest` (trava da V19). Go/No-Go do piloto em [`docs/go-no-go-piloto.md`](./docs/go-no-go-piloto.md). Reauditoria de 10/10/2026: `RideIT` (aceite concorrente por dois motoristas → 200/409, clique duplo no pedido, `?sort=` invalido → 400, link de compartilhamento), `DriverDocumentIT` (envio duplicado concorrente → 201/409), `SessionAndDocsIT` (revogacao por troca de cidade, login do Swagger), alem de `RideShareServiceTest`, `DocsAuthenticationProviderTest`, `DocsSecurityWebMvcTest`, `VehiclePlateTest` e `GlobalExceptionHandlerTest`. Segundo ciclo: `NotificationServiceTest`, `FieldCryptoTest`, `FieldCryptoSpringWiringTest`, `CnhTest`, `UserStreamRegistryTest`, `ClientIpTest`, `RideRetentionSchedulerTest`, `DocumentRetentionSchedulerTest`, `AdminRideControllerWebMvcTest` e casos novos nos testes de servico. Primeiro ciclo:
 
 - `SecurityWebMvcTest` — cadeia de seguranca real: 401 sem/token adulterado, 403 por role, conta suspensa (403) e excluida (401) com token ainda valido, rota publica com token bloqueado, acesso cruzado (BOLA)
 - `RateLimitFilterTest`, `UserAccountServiceTest`, `DriverServiceTest`, `AdminAuditServiceTest`
@@ -304,6 +302,6 @@ Ja existentes:
 - `UserProfileServiceTest` — edição de perfil, troca de senha, re-emissão de JWT ao mudar cidade, cidade fora da whitelist não altera nada, motorista derrubado para offline ao trocar de cidade (e mantido online quando só o nome muda), conta só-social sem senha (409 explicativo) e reset pelo admin que a converte em dual
 - `AdminMetricsServiceTest` (Mockito) — painel admin: derivação de `active`/taxas/ticket médio, defaulting do período (últimos 30 dias), range invertido → 400, agregado nulo → zeros
 
-Total: **461 testes unitarios** passando em segundos (JUnit 5 + Mockito, sem Docker/Postgres) e **7 de integracao** contra Postgres 16 real, que aplicam as migrations V1–V35 com `ddl-auto=validate`.
+Total: **485 testes unitarios** passando em segundos (JUnit 5 + Mockito, sem Docker/Postgres) e **24 de integracao** contra Postgres 16 real, que aplicam as migrations V1–V36 com `ddl-auto=validate`.
 
 > **Lock otimista e indices parciais:** exercitados de verdade pelos IT — duas requisicoes simultaneas batem no `@Version` (aceite) e nos indices `ux_rides_passenger_active`/`ux_driver_documents_one_submitted`, e cada uma vira 409.

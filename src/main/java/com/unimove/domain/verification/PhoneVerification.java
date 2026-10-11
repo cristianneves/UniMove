@@ -33,6 +33,10 @@ public class PhoneVerification {
     @Column(name = "status", nullable = false, length = 20)
     private PhoneVerificationStatus status = PhoneVerificationStatus.PENDING;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "purpose", nullable = false, updatable = false, length = 20)
+    private PhoneVerificationPurpose purpose = PhoneVerificationPurpose.NEW_PHONE;
+
     /** Telefone do remetente, como a Meta entregou. Nunca vem do formulario. */
     @Column(name = "verified_phone", length = 20)
     private String verifiedPhone;

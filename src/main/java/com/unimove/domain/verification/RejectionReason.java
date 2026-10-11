@@ -7,5 +7,8 @@ package com.unimove.domain.verification;
 public enum RejectionReason {
 
     /** O numero que enviou a mensagem ja tem conta na UniMove — o caminho e login. */
-    PHONE_IN_USE
+    PHONE_IN_USE,
+
+    /** Recuperacao de senha de um numero sem conta na UniMove — o caminho e cadastro. */
+    PHONE_NOT_REGISTERED
 }

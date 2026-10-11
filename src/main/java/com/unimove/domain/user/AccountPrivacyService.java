@@ -2,6 +2,8 @@ package com.unimove.domain.user;
 
 import com.unimove.domain.chat.ChatPrivacyPort;
 import com.unimove.domain.notification.NotificationPrivacyPort;
+import com.unimove.domain.payment.PaymentService;
+import com.unimove.domain.ride.PaymentMethod;
 import com.unimove.domain.ride.RidePrivacyPort;
 import com.unimove.domain.user.document.DriverDocumentService;
 import com.unimove.domain.user.dto.DataExportResponse;
@@ -49,6 +51,7 @@ public class AccountPrivacyService {
     private final ChatPrivacyPort chatPrivacy;
     private final NotificationPrivacyPort notificationPrivacy;
     private final PasswordEncoder passwordEncoder;
+    private final PaymentService paymentService;
     private final PrivacyProperties privacy;
     private final ApplicationEventPublisher events;
     private final Clock clock;
@@ -63,6 +66,7 @@ public class AccountPrivacyService {
                                  ChatPrivacyPort chatPrivacy,
                                  NotificationPrivacyPort notificationPrivacy,
                                  PasswordEncoder passwordEncoder,
+                                 PaymentService paymentService,
                                  PrivacyProperties privacy,
                                  ApplicationEventPublisher events,
                                  Clock clock) {
@@ -76,6 +80,7 @@ public class AccountPrivacyService {
         this.chatPrivacy = chatPrivacy;
         this.notificationPrivacy = notificationPrivacy;
         this.passwordEncoder = passwordEncoder;
+        this.paymentService = paymentService;
         this.privacy = privacy;
         this.events = events;
         this.clock = clock;
@@ -96,6 +101,11 @@ public class AccountPrivacyService {
         boolean hasRidePreference = req.preferredPaymentMethod() != null || req.preferredCategory() != null;
         if (hasRidePreference && user.getRole() != Role.PASSAGEIRO) {
             throw new InvalidPreferenceException();
+        }
+        // Pix desligado (piloto so dinheiro): o app nao pode pre-selecionar Pix e so
+        // descobrir o 409 no confirm-payment.
+        if (req.preferredPaymentMethod() == PaymentMethod.PIX && !paymentService.isPixEnabled()) {
+            throw InvalidPreferenceException.pixUnavailable();
         }
         // PUT substitui: ausente = sem preferencia.
         user.setPreferredPaymentMethod(req.preferredPaymentMethod());
