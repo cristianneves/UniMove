@@ -11,6 +11,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -18,7 +19,9 @@ import java.time.Instant;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -42,7 +45,7 @@ class PhoneVerificationControllerTest {
     @DisplayName("criação de desafio devolve 201 com o link wa.me")
     void createChallengeReturns201() throws Exception {
         UUID id = UUID.randomUUID();
-        when(service.createChallenge(anyString())).thenReturn(new ChallengeResponse(
+        when(service.createChallenge(anyString(), any())).thenReturn(new ChallengeResponse(
                 id, "ABC12345", "https://wa.me/5574999990000?text=UNIMOVE-ABC12345",
                 Instant.parse("2026-08-03T12:10:00Z")));
 
@@ -56,7 +59,7 @@ class PhoneVerificationControllerTest {
     @Test
     @DisplayName("atrás de proxy o rate limit usa o primeiro IP do X-Forwarded-For, não o do proxy")
     void usesFirstForwardedIpForRateLimiting() throws Exception {
-        when(service.createChallenge(anyString())).thenReturn(new ChallengeResponse(
+        when(service.createChallenge(anyString(), any())).thenReturn(new ChallengeResponse(
                 UUID.randomUUID(), "ABC12345", "https://wa.me/x", Instant.now()));
 
         mvc.perform(post("/auth/phone/challenge")
@@ -64,14 +67,42 @@ class PhoneVerificationControllerTest {
                 .andExpect(status().isCreated());
 
         ArgumentCaptor<String> ip = ArgumentCaptor.forClass(String.class);
-        verify(service).createChallenge(ip.capture());
+        verify(service).createChallenge(ip.capture(), eq(PhoneVerificationPurpose.NEW_PHONE));
         assertThat(ip.getValue()).isEqualTo("203.0.113.7");
+    }
+
+    @Test
+    @DisplayName("purpose PASSWORD_RESET no corpo chega ao service; corpo vazio = NEW_PHONE")
+    void createChallengeWithPurpose() throws Exception {
+        when(service.createChallenge(anyString(), any())).thenReturn(new ChallengeResponse(
+                UUID.randomUUID(), "ABC12345", "https://wa.me/x", Instant.now()));
+
+        mvc.perform(post("/auth/phone/challenge")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"purpose\":\"PASSWORD_RESET\"}"))
+                .andExpect(status().isCreated());
+        verify(service).createChallenge(anyString(), eq(PhoneVerificationPurpose.PASSWORD_RESET));
+
+        mvc.perform(post("/auth/phone/challenge")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isCreated());
+        verify(service).createChallenge(anyString(), eq(PhoneVerificationPurpose.NEW_PHONE));
+    }
+
+    @Test
+    @DisplayName("purpose desconhecido vira 400")
+    void createChallengeWithUnknownPurpose() throws Exception {
+        mvc.perform(post("/auth/phone/challenge")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"purpose\":\"QUALQUER\"}"))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
     @DisplayName("estouro do teto por IP vira 429")
     void rateLimitedReturns429() throws Exception {
-        when(service.createChallenge(anyString())).thenThrow(new TooManyChallengesException());
+        when(service.createChallenge(anyString(), any())).thenThrow(new TooManyChallengesException());
 
         mvc.perform(post("/auth/phone/challenge"))
                 .andExpect(status().isTooManyRequests())

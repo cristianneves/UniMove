@@ -40,6 +40,7 @@ public class UserProfileService {
     private final CityCatalog cityCatalog;
     private final AdminAuditLog auditLog;
     private final PhoneVerificationService phoneVerificationService;
+    private final LoginAttemptService loginAttemptService;
     private final ApplicationEventPublisher events;
     private final SecureRandom random = new SecureRandom();
 
@@ -50,6 +51,7 @@ public class UserProfileService {
                               CityCatalog cityCatalog,
                               AdminAuditLog auditLog,
                               PhoneVerificationService phoneVerificationService,
+                              LoginAttemptService loginAttemptService,
                               ApplicationEventPublisher events) {
         this.userRepository = userRepository;
         this.driverRepository = driverRepository;
@@ -58,6 +60,7 @@ public class UserProfileService {
         this.cityCatalog = cityCatalog;
         this.auditLog = auditLog;
         this.phoneVerificationService = phoneVerificationService;
+        this.loginAttemptService = loginAttemptService;
         this.events = events;
     }
 
@@ -95,9 +98,9 @@ public class UserProfileService {
     }
 
     /**
-     * Atualiza nome e cidade. E-mail (login), role e telefone são imutáveis —
-     * o telefone foi verificado no WhatsApp durante o cadastro e deixá-lo
-     * editável aqui anularia aquela verificação.
+     * Atualiza nome e cidade. E-mail (login) e role são imutáveis; o telefone
+     * só muda por novo desafio do WhatsApp ({@link #changePhone}) — editá-lo
+     * aqui anularia aquela verificação.
      * Como o JWT carrega a claim {@code cidade}, mudança de cidade reemite o
      * token — sem isso, mural e criação de corrida continuariam usando a
      * cidade antiga até o re-login.
@@ -182,8 +185,8 @@ public class UserProfileService {
     }
 
     /**
-     * Reset de senha pelo admin — caminho de "esqueci minha senha" do MVP, sem
-     * infra de e-mail/SMS. A senha temporária retorna em claro uma única vez e
+     * Reset de senha pelo admin — alternativa ao {@link #resetPasswordWithPhone}
+     * para quem perdeu o acesso ao número. A senha temporária retorna em claro uma única vez e
      * o admin repassa ao usuário por canal externo.
      */
     @Transactional
@@ -202,6 +205,28 @@ public class UserProfileService {
         auditLog.record(adminId, AuditAction.USER_PASSWORD_RESET, "USER", targetUserId, null);
         log.warn("Senha do usuário {} resetada pelo admin {}", targetUserId, adminId);
         return new AdminResetPasswordResponse(user.getId(), user.getEmail(), temporaryPassword);
+    }
+
+    /**
+     * Esqueci minha senha, sem sessao e sem admin: o usuario prova a posse do
+     * numero da conta num desafio {@code PASSWORD_RESET} do WhatsApp e escolhe
+     * a senha nova. Mesmo efeito da troca de senha: sessoes anteriores caem e o
+     * bloqueio por tentativas e zerado. Conta so-social ganha senha (vira dual),
+     * como no reset pelo admin. Nao devolve token: o app segue para o login.
+     */
+    @Transactional
+    public void resetPasswordWithPhone(String verificationToken, String newPassword) {
+        String phone = phoneVerificationService.consumePasswordResetPhone(verificationToken);
+        User user = userRepository.findByPhone(phone).orElseThrow(UserNotFoundException::new);
+        if (user.getRole() == Role.ADMIN) {
+            throw new CannotResetAdminPasswordException();
+        }
+        user.setPasswordHash(passwordEncoder.encode(newPassword));
+        user.setMustChangePassword(false);
+        user.setTokensValidAfter(Instant.now());
+        events.publishEvent(new AccountAccessRevokedEvent(user.getId()));
+        loginAttemptService.recordSuccess(user.getEmail());
+        log.info("Senha do usuario {} redefinida via WhatsApp (sessoes anteriores revogadas)", user.getId());
     }
 
     private String generateTemporaryPassword() {

@@ -15,6 +15,8 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     boolean existsByEmail(String email);
     boolean existsByPhone(String phone);
 
+    Optional<User> findByPhone(String phone);
+
     @Query("""
             select new com.unimove.domain.user.AccountSnapshot(u.status, u.tokensValidAfter, u.mustChangePassword)
             from User u where u.id = :id

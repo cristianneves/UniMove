@@ -59,11 +59,12 @@ public class PhoneVerificationService {
     }
 
     @Transactional
-    public ChallengeResponse createChallenge(String clientIp) {
+    public ChallengeResponse createChallenge(String clientIp, PhoneVerificationPurpose purpose) {
         rateLimiter.assertWithinLimit(clientIp);
 
         Instant now = clock.instant();
         PhoneVerification verification = new PhoneVerification();
+        verification.setPurpose(purpose);
         verification.setCode(generateUniqueCode());
         verification.setStatus(PhoneVerificationStatus.PENDING);
         verification.setExpiresAt(now.plus(Duration.ofMinutes(props.challengeTtlMinutes())));
@@ -111,10 +112,14 @@ public class PhoneVerificationService {
             return;
         }
 
-        if (phoneRegistry.isPhoneRegistered(fromPhone)) {
+        // Cadastro/troca exige numero livre; recuperacao de senha, numero da conta.
+        boolean registered = phoneRegistry.isPhoneRegistered(fromPhone);
+        boolean passwordReset = verification.getPurpose() == PhoneVerificationPurpose.PASSWORD_RESET;
+        if (registered != passwordReset) {
+            RejectionReason reason = passwordReset ? RejectionReason.PHONE_NOT_REGISTERED : RejectionReason.PHONE_IN_USE;
             verification.setStatus(PhoneVerificationStatus.REJECTED);
-            verification.setRejectionReason(RejectionReason.PHONE_IN_USE);
-            log.info("Desafio {} recusado: telefone ja possui conta.", verification.getId());
+            verification.setRejectionReason(reason);
+            log.info("Desafio {} recusado: {}.", verification.getId(), reason);
             return;
         }
 
@@ -161,10 +166,25 @@ public class PhoneVerificationService {
      */
     @Transactional
     public String consumeVerifiedPhone(String token) {
+        return consume(token, PhoneVerificationPurpose.NEW_PHONE);
+    }
+
+    /**
+     * Mesmo contrato de {@link #consumeVerifiedPhone}, para a recuperacao de
+     * senha: so aceita token de desafio {@code PASSWORD_RESET}.
+     */
+    @Transactional
+    public String consumePasswordResetPhone(String token) {
+        return consume(token, PhoneVerificationPurpose.PASSWORD_RESET);
+    }
+
+    private String consume(String token, PhoneVerificationPurpose purpose) {
         if (token == null || token.isBlank()) {
             throw new PhoneVerificationRequiredException();
         }
+        // Token de outro proposito e tratado como inexistente.
         PhoneVerification verification = repository.findByToken(token)
+                .filter(v -> v.getPurpose() == purpose)
                 .orElseThrow(PhoneVerificationRequiredException::new);
 
         if (verification.getStatus() != PhoneVerificationStatus.VERIFIED) {
@@ -178,7 +198,7 @@ public class PhoneVerificationService {
 
         verification.setStatus(PhoneVerificationStatus.CONSUMED);
         verification.setToken(null);
-        log.info("Desafio {} consumido no cadastro.", verification.getId());
+        log.info("Desafio {} consumido ({}).", verification.getId(), purpose);
         return verification.getVerifiedPhone();
     }
 

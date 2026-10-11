@@ -6,6 +6,7 @@ import com.unimove.domain.user.dto.AdminResetPasswordResponse;
 import com.unimove.domain.user.dto.UpdateProfileRequest;
 import com.unimove.domain.user.dto.UpdateProfileResponse;
 import com.unimove.domain.user.dto.UserProfileResponse;
+import com.unimove.domain.verification.PhoneVerificationRequiredException;
 import com.unimove.domain.verification.PhoneVerificationService;
 import com.unimove.shared.event.AccountAccessRevokedEvent;
 import com.unimove.shared.security.AuthenticatedUser;
@@ -49,6 +50,7 @@ class UserProfileServiceTest {
     @Mock JwtService jwtService;
     @Mock CityCatalog cityCatalog;
     @Mock PhoneVerificationService phoneVerificationService;
+    @Mock LoginAttemptService loginAttemptService;
     @Mock ApplicationEventPublisher events;
     @Mock com.unimove.domain.audit.AdminAuditLog auditLog;
 
@@ -344,5 +346,48 @@ class UserProfileServiceTest {
         driver.setApproved(true);
         driver.setOnline(true);
         return driver;
+    }
+
+    @Test
+    @DisplayName("esqueci minha senha: troca o hash da conta do numero, revoga sessoes e zera o bloqueio")
+    void resetPasswordWithPhoneHappyPath() {
+        user.setPasswordHash(null); // conta so-social ganha senha
+        user.setMustChangePassword(true);
+        when(phoneVerificationService.consumePasswordResetPhone("tok")).thenReturn("5574999990000");
+        when(userRepository.findByPhone("5574999990000")).thenReturn(Optional.of(user));
+        when(passwordEncoder.encode("senhaNova123")).thenReturn("hash-novo");
+
+        service.resetPasswordWithPhone("tok", "senhaNova123");
+
+        assertThat(user.getPasswordHash()).isEqualTo("hash-novo");
+        assertThat(user.isMustChangePassword()).isFalse();
+        assertThat(user.getTokensValidAfter()).isNotNull();
+        verify(events).publishEvent(new AccountAccessRevokedEvent(USER_ID));
+        verify(loginAttemptService).recordSuccess("p@example.com");
+    }
+
+    @Test
+    @DisplayName("esqueci minha senha: token invalido nao mexe em conta nenhuma")
+    void resetPasswordWithPhoneInvalidToken() {
+        when(phoneVerificationService.consumePasswordResetPhone("velho"))
+                .thenThrow(new PhoneVerificationRequiredException());
+
+        assertThatThrownBy(() -> service.resetPasswordWithPhone("velho", "senhaNova123"))
+                .isInstanceOf(PhoneVerificationRequiredException.class);
+        verify(userRepository, never()).findByPhone(anyString());
+        verify(passwordEncoder, never()).encode(anyString());
+    }
+
+    @Test
+    @DisplayName("esqueci minha senha: conta ADMIN e recusada")
+    void resetPasswordWithPhoneRejectsAdmin() {
+        user.setRole(Role.ADMIN);
+        when(phoneVerificationService.consumePasswordResetPhone("tok")).thenReturn("5574999990000");
+        when(userRepository.findByPhone("5574999990000")).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> service.resetPasswordWithPhone("tok", "senhaNova123"))
+                .isInstanceOf(CannotResetAdminPasswordException.class);
+        assertThat(user.getPasswordHash()).isEqualTo("hash-antigo");
+        verify(events, never()).publishEvent(any());
     }
 }

@@ -18,6 +18,8 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.junit.jupiter.api.DisplayName;
+import com.unimove.domain.verification.PhoneVerificationRequiredException;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -25,6 +27,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -43,6 +46,7 @@ class AuthControllerWebMvcTest {
 
     @MockBean AuthService authService;
     @MockBean SocialAuthService socialAuthService;
+    @MockBean UserProfileService userProfileService;
     @MockBean com.unimove.shared.security.JwtService jwtService;
     @MockBean com.unimove.shared.security.JwtAuthenticationFilter jwtAuthenticationFilter;
     @MockBean DriverService driverService;
@@ -258,5 +262,40 @@ class AuthControllerWebMvcTest {
                 .andExpect(jsonPath("$.fieldErrors").exists());
 
         verify(socialAuthService, never()).register(any());
+    }
+
+    @Test
+    @DisplayName("esqueci minha senha: token do WhatsApp + senha nova → 204")
+    void resetPasswordReturns204() throws Exception {
+        mvc.perform(post("/auth/password/reset")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"verificationToken\":\"tok-reset\",\"newPassword\":\"senhaNova123\"}"))
+                .andExpect(status().isNoContent());
+
+        verify(userProfileService).resetPasswordWithPhone("tok-reset", "senhaNova123");
+    }
+
+    @Test
+    @DisplayName("esqueci minha senha: senha curta ou token ausente → 400 sem chegar ao service")
+    void resetPasswordValidatesPayload() throws Exception {
+        mvc.perform(post("/auth/password/reset")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"verificationToken\":\"\",\"newPassword\":\"123\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors").exists());
+
+        verify(userProfileService, never()).resetPasswordWithPhone(any(), any());
+    }
+
+    @Test
+    @DisplayName("esqueci minha senha: token inválido/vencido → 400")
+    void resetPasswordWithInvalidTokenReturns400() throws Exception {
+        doThrow(new PhoneVerificationRequiredException())
+                .when(userProfileService).resetPasswordWithPhone("velho", "senhaNova123");
+
+        mvc.perform(post("/auth/password/reset")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"verificationToken\":\"velho\",\"newPassword\":\"senhaNova123\"}"))
+                .andExpect(status().isBadRequest());
     }
 }

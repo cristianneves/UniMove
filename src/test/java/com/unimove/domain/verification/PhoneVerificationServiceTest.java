@@ -89,7 +89,11 @@ class PhoneVerificationServiceTest {
     }
 
     private ChallengeResponse createChallenge() {
-        ChallengeResponse resp = service.createChallenge("10.0.0.1");
+        return createChallenge(PhoneVerificationPurpose.NEW_PHONE);
+    }
+
+    private ChallengeResponse createChallenge(PhoneVerificationPurpose purpose) {
+        ChallengeResponse resp = service.createChallenge("10.0.0.1", purpose);
         when(repository.findByCode(saved.getCode())).thenReturn(Optional.of(saved));
         when(repository.findById(saved.getId())).thenReturn(Optional.of(saved));
         return resp;
@@ -275,6 +279,53 @@ class PhoneVerificationServiceTest {
 
         assertThatThrownBy(() -> service.consumeVerifiedPhone("qualquer-coisa"))
                 .isInstanceOf(PhoneVerificationRequiredException.class);
+    }
+
+    @Test
+    @DisplayName("recuperação de senha: número com conta verifica e o token só serve para o reset")
+    void passwordResetChallengeRequiresRegisteredPhone() {
+        createChallenge(PhoneVerificationPurpose.PASSWORD_RESET);
+        when(phoneRegistry.isPhoneRegistered(PHONE)).thenReturn(true);
+
+        service.handleInboundMessage(PHONE, "UNIMOVE-" + saved.getCode());
+
+        assertThat(saved.getPurpose()).isEqualTo(PhoneVerificationPurpose.PASSWORD_RESET);
+        assertThat(saved.getStatus()).isEqualTo(PhoneVerificationStatus.VERIFIED);
+        String token = saved.getToken();
+        when(repository.findByToken(token)).thenReturn(Optional.of(saved));
+
+        // Token de recuperação não cria conta nem troca telefone.
+        assertThatThrownBy(() -> service.consumeVerifiedPhone(token))
+                .isInstanceOf(PhoneVerificationRequiredException.class);
+        assertThat(saved.getStatus()).isEqualTo(PhoneVerificationStatus.VERIFIED);
+
+        assertThat(service.consumePasswordResetPhone(token)).isEqualTo(PHONE);
+        assertThat(saved.getStatus()).isEqualTo(PhoneVerificationStatus.CONSUMED);
+    }
+
+    @Test
+    @DisplayName("recuperação de senha de número sem conta é recusada com PHONE_NOT_REGISTERED")
+    void passwordResetChallengeFromUnknownPhoneIsRejected() {
+        createChallenge(PhoneVerificationPurpose.PASSWORD_RESET);
+        when(phoneRegistry.isPhoneRegistered(PHONE)).thenReturn(false);
+
+        service.handleInboundMessage(PHONE, "UNIMOVE-" + saved.getCode());
+
+        assertThat(saved.getStatus()).isEqualTo(PhoneVerificationStatus.REJECTED);
+        assertThat(saved.getRejectionReason()).isEqualTo(RejectionReason.PHONE_NOT_REGISTERED);
+        assertThat(saved.getToken()).isNull();
+    }
+
+    @Test
+    @DisplayName("token de cadastro não redefine senha")
+    void signupTokenCannotResetPassword() {
+        createChallenge();
+        service.handleInboundMessage(PHONE, "UNIMOVE-" + saved.getCode());
+        when(repository.findByToken(saved.getToken())).thenReturn(Optional.of(saved));
+
+        assertThatThrownBy(() -> service.consumePasswordResetPhone(saved.getToken()))
+                .isInstanceOf(PhoneVerificationRequiredException.class);
+        assertThat(saved.getStatus()).isEqualTo(PhoneVerificationStatus.VERIFIED);
     }
 
     @Test

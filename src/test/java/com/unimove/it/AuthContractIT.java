@@ -159,6 +159,48 @@ class AuthContractIT extends IntegrationTestSupport {
         assertThat(get("/rides/mural", token(passenger)).statusCode()).isEqualTo(403);
     }
 
+    @Test
+    @DisplayName("esqueci minha senha: desafio PASSWORD_RESET → 204 → senha antiga 401, nova 200, token velho 401")
+    void passwordResetWithWhatsApp() throws InterruptedException {
+        User user = newUser(Role.PASSAGEIRO);
+        String oldToken = token(user);
+        // iat do JWT tem precisao de segundo: o token "antigo" precisa ser de
+        // um segundo anterior ao do reset para ser revogado.
+        Thread.sleep(1100);
+        String body = "{\"purpose\":\"PASSWORD_RESET\"}";
+
+        // Numero sem conta: recusado, sem token.
+        JsonNode unknown = json(send(postJson("/auth/phone/challenge", null, body)));
+        whatsAppMessage(randomPhone(), unknown.get("code").asText());
+        JsonNode rejected = json(get("/auth/phone/challenge/" + unknown.get("challengeId").asText(), null));
+        assertThat(rejected.get("rejectionReason").asText()).isEqualTo("PHONE_NOT_REGISTERED");
+
+        JsonNode challenge = json(send(postJson("/auth/phone/challenge", null, body)));
+        whatsAppMessage(user.getPhone(), challenge.get("code").asText());
+        String resetToken = json(get("/auth/phone/challenge/" + challenge.get("challengeId").asText(), null))
+                .get("verificationToken").asText();
+
+        // Token de recuperacao nao cria conta.
+        assertThat(send(postJson("/auth/register", null, register(newEmail(), "PASSAGEIRO", city, resetToken, terms())))
+                .statusCode()).isEqualTo(400);
+
+        String reset = "{\"verificationToken\":\"" + resetToken + "\",\"newPassword\":\"senha-nova-456\"}";
+        assertThat(send(postJson("/auth/password/reset", null, reset)).statusCode()).isEqualTo(204);
+        assertThat(send(postJson("/auth/password/reset", null, reset)).statusCode()).isEqualTo(400);
+
+        assertThat(send(postJson("/auth/login", null,
+                "{\"email\":\"" + user.getEmail() + "\",\"password\":\"" + PASSWORD + "\"}")).statusCode()).isEqualTo(401);
+        assertThat(send(postJson("/auth/login", null,
+                "{\"email\":\"" + user.getEmail() + "\",\"password\":\"senha-nova-456\"}")).statusCode()).isEqualTo(200);
+        assertThat(get("/users/me", oldToken).statusCode()).isEqualTo(401);
+
+        // Token de cadastro nao redefine senha.
+        String signupToken = verifiedToken(randomPhone());
+        assertThat(send(postJson("/auth/password/reset", null,
+                "{\"verificationToken\":\"" + signupToken + "\",\"newPassword\":\"senha-nova-789\"}")).statusCode())
+                .isEqualTo(400);
+    }
+
     // ------------------------------------------------------------------------
 
     /** Desafio + mensagem do WhatsApp; devolve o verificationToken. */

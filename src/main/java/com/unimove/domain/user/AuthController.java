@@ -3,6 +3,7 @@ package com.unimove.domain.user;
 import com.unimove.domain.user.dto.AuthResponse;
 import com.unimove.domain.user.dto.LoginRequest;
 import com.unimove.domain.user.dto.RegisterRequest;
+import com.unimove.domain.user.dto.ResetPasswordRequest;
 import com.unimove.domain.user.dto.SocialAuthResponse;
 import com.unimove.domain.user.dto.SocialLoginRequest;
 import com.unimove.domain.user.dto.SocialRegisterRequest;
@@ -21,10 +22,13 @@ public class AuthController {
 
     private final AuthService authService;
     private final SocialAuthService socialAuthService;
+    private final UserProfileService userProfileService;
 
-    public AuthController(AuthService authService, SocialAuthService socialAuthService) {
+    public AuthController(AuthService authService, SocialAuthService socialAuthService,
+                          UserProfileService userProfileService) {
         this.authService = authService;
         this.socialAuthService = socialAuthService;
+        this.userProfileService = userProfileService;
     }
 
     @PostMapping("/register")
@@ -63,5 +67,16 @@ public class AuthController {
                     + "O provedor social substitui a senha, nunca a verificação do telefone.")
     public ResponseEntity<AuthResponse> socialRegister(@Valid @RequestBody SocialRegisterRequest req) {
         return ResponseEntity.status(HttpStatus.CREATED).body(socialAuthService.register(req));
+    }
+
+    @PostMapping("/password/reset")
+    @Operation(summary = "Esqueci minha senha (sem sessão)",
+            description = "Recebe o `verificationToken` de um desafio `PASSWORD_RESET` verificado no WhatsApp "
+                    + "(`POST /auth/phone/challenge` com `{\"purpose\":\"PASSWORD_RESET\"}`) e a senha nova. "
+                    + "Revoga as sessões anteriores e responde 204: o app segue para o login. "
+                    + "Token ausente, vencido, já usado ou de cadastro → 400.")
+    public ResponseEntity<Void> resetPassword(@Valid @RequestBody ResetPasswordRequest req) {
+        userProfileService.resetPasswordWithPhone(req.verificationToken(), req.newPassword());
+        return ResponseEntity.noContent().build();
     }
 }
