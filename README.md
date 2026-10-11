@@ -110,14 +110,12 @@ com.unimove
 - **Swagger UI:** `http://localhost:8080/swagger-ui.html` — **restrito a ADMIN**: abre a tela de login em `/docs/login` (e-mail/senha de admin, com o mesmo lockout do app; admin com senha temporaria troca no app antes). Para o "Try it out", cole um JWT no botao **Authorize**.
 - **OpenAPI JSON:** `http://localhost:8080/v3/api-docs` (mesma sessao de admin)
 - **Coleção HTTP versionada:** [`docs/api.http`](./docs/api.http) — abre direto no IntelliJ HTTP Client ou VSCode REST Client.
-- **Smoke test ponta-a-ponta:** [`docs/smoke-test.md`](./docs/smoke-test.md) — checklist manual de ~10 min para validar release.
-- **Estado atual:** [`docs/estado-atual-projeto.md`](./docs/estado-atual-projeto.md) — snapshot do que existe e do fluxo ponta-a-ponta.
+- **Smoke test de um ambiente:** `scripts/smoke.sh <url>` (ver *Smoke de um ambiente* acima).
 - **Visão geral e fluxo no Swagger:** [`docs/visao-geral-e-fluxo-swagger.md`](./docs/visao-geral-e-fluxo-swagger.md) — porquê de cada decisão de MVP + roteiro completo.
-- **Painel de métricas (admin):** [`docs/admin-metrics.md`](./docs/admin-metrics.md) — contrato do `GET /admin/metrics`.
 - **Login social:** [`docs/login-social-google.md`](./docs/login-social-google.md) — fluxo de ID Token, vinculação de contas e configuração no Google Cloud.
 - **Login social — guia do app:** [`docs/guia-app-login-google.md`](./docs/guia-app-login-google.md) — passo a passo para o dev mobile: OAuth clients de plataforma, `google_sign_in` e os dois fluxos de tela.
-- **Surge pricing:** [`docs/plano-surge-pricing.md`](./docs/plano-surge-pricing.md) — spec do preço dinâmico por demanda.
-- **Análise/roadmap:** [`docs/analise-mvp.md`](./docs/analise-mvp.md) — lacunas priorizadas para o piloto real.
+- **Go/No-Go do piloto:** [`docs/go-no-go-piloto.md`](./docs/go-no-go-piloto.md) — decisões de escopo, critérios bloqueantes, riscos aceitos e rollback.
+- **Matriz de requisitos:** [`docs/matriz-requisitos-mvp.md`](./docs/matriz-requisitos-mvp.md) — evidência do backend para RF01–RF10 e RNF01–RNF09.
 - **Deploy:** [`docs/deploy.md`](./docs/deploy.md) — Render + Supabase, secrets do GitHub, rollback e limites do plano gratuito.
 - **Homologação / runbook:** [`docs/homologacao-runbook.md`](./docs/homologacao-runbook.md) — checagens antes de aplicar V23–V28, bucket de documentos, smoke autenticado, backup e rollback.
 - **LGPD — inventário de dados:** [`docs/lgpd-inventario-dados.md`](./docs/lgpd-inventario-dados.md) — o que coletamos, por quê, com quem compartilhamos, retenção e como atender o titular.
@@ -221,7 +219,7 @@ Para rodar a stack completa (API + Postgres + TLS) numa VPS propria, o
 
 ## Status do MVP
 
-Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.md` existem e respondem com as roles corretas. Veja `docs/estado-atual-projeto.md` para o diagnostico completo.
+Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.md` existem e respondem com as roles corretas. Pendencias para o piloto em `docs/go-no-go-piloto.md`.
 
 | Bloco                       | Status        | Observacoes |
 |-----------------------------|---------------|-------------|
@@ -266,7 +264,7 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 | Geometria da rota (mapa)    | concluido     | OSRM `overview=full&geometries=polyline`; `GET /rides/{id}/route`, polyline no estimate/share; `route_geometry` + `route_cache.geometry` |
 | Busca de endereco (geocoding) | concluido   | `GET /maps/geocode` (autocomplete) + `GET /maps/reverse` (pin) via Photon; `reverse` cacheado em `geocode_cache` |
 | OpenAPI / Swagger UI        | concluido     | `springdoc-openapi` em `/swagger-ui.html`, so para ADMIN via login em `/docs/login` (cadeia de seguranca propria com sessao + CSRF; a API segue stateless) |
-| Coleção HTTP / smoke test   | concluido     | `docs/api.http` + `docs/smoke-test.md` |
+| Coleção HTTP / smoke test   | concluido     | `docs/api.http` + `scripts/smoke.sh` |
 
 > **Contrato do cliente ao trocar de cidade:** `PUT /users/me` devolve um `token` novo quando a cidade muda, e o app deve **substituir o JWT e reabrir os streams SSE** (`/rides/mural/stream`, `/rides/{id}/status-stream`, `/chat/rides/{id}/stream`). Todos os tokens anteriores sao revogados (401 `"Sessão encerrada por alteração na conta (senha ou cidade)..."`, inclusive em outros aparelhos) e os streams abertos com eles sao encerrados pelo backend.
 

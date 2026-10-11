@@ -4,7 +4,7 @@ import java.util.List;
 
 /**
  * Ponte texto ↔ coordenada (geocoding), via Photon (OSM). Irmao do {@link MapsService}
- * (rotas), mas com provedor e base URL proprios. Ver docs/plano-busca-endereco.md.
+ * (rotas), mas com provedor e base URL proprios.
  */
 public interface GeocodingService {
 

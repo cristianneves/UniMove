@@ -223,7 +223,7 @@ pg_dump "postgresql://postgres.<ref>:<senha>@aws-0-us-east-1.pooler.supabase.com
 | Hiberna em 15 min / cold start 30–60 s | plano free do Render | ao sair do modo demo |
 | Schedulers param enquanto hiberna | idem | idem |
 | 512 MB de RAM | plano free | JVM ja calibrada (SerialGC, heap 50%, pool de 5) |
-| Instancia unica | hubs de SSE em memoria (`analise-mvp.md`) | ao escalar: pub/sub via Redis |
+| Instancia unica | hubs de SSE em memoria | ao escalar: pub/sub via Redis |
 | Supabase pausa com 7 dias parado | plano free | despausar no dashboard |
 | Sem staging | um ambiente so, como no MVP | antes de abrir para usuarios reais |
 | OSRM na demo publica | `router.project-osrm.org`, sem SLA | self-host |
