@@ -5,6 +5,7 @@ import com.unimove.domain.ride.RideCategory;
 import com.unimove.domain.user.dto.UpdatePreferencesRequest;
 import com.unimove.domain.chat.ChatPrivacyPort;
 import com.unimove.domain.notification.NotificationPrivacyPort;
+import com.unimove.domain.payment.PaymentService;
 import com.unimove.domain.ride.RidePrivacyPort;
 import com.unimove.domain.user.document.DriverDocumentService;
 import com.unimove.domain.user.dto.DataExportResponse;
@@ -56,6 +57,7 @@ class AccountPrivacyServiceTest {
     @Mock ChatPrivacyPort chatPrivacy;
     @Mock NotificationPrivacyPort notificationPrivacy;
     @Mock PasswordEncoder passwordEncoder;
+    @Mock PaymentService paymentService;
     @Mock ApplicationEventPublisher events;
 
     private AccountPrivacyService service;
@@ -66,7 +68,7 @@ class AccountPrivacyServiceTest {
     void setUp() {
         service = new AccountPrivacyService(userRepository, driverRepository, savedPlaceRepository,
                 socialIdentityRepository, documentService, profileService, ridePrivacy, chatPrivacy, notificationPrivacy,
-                passwordEncoder, new PrivacyProperties(TERMS, "https://x/privacidade"), events,
+                passwordEncoder, paymentService, new PrivacyProperties(TERMS, "https://x/privacidade"), events,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         user = new User();
         user.setId(UUID.randomUUID());
@@ -196,6 +198,7 @@ class AccountPrivacyServiceTest {
     @Test
     @DisplayName("passageiro guarda pagamento e categoria preferidos; PUT sem eles limpa")
     void passengerRidePreferences() {
+        when(paymentService.isPixEnabled()).thenReturn(true);
         PrivacyPreferencesResponse set = service.updatePreferences(auth,
                 new UpdatePreferencesRequest(false, PaymentMethod.PIX, RideCategory.MOTO));
         assertThat(set.preferredPaymentMethod()).isEqualTo(PaymentMethod.PIX);
@@ -206,6 +209,24 @@ class AccountPrivacyServiceTest {
                 new UpdatePreferencesRequest(false, null, null));
         assertThat(cleared.preferredPaymentMethod()).isNull();
         assertThat(cleared.preferredCategory()).isNull();
+    }
+
+    @Test
+    @DisplayName("Pix desligado (piloto so dinheiro): preferir Pix → 400 e nada muda; dinheiro passa")
+    void pixPreferenceRejectedWhenPixDisabled() {
+        user.setPreferredPaymentMethod(PaymentMethod.DINHEIRO);
+
+        assertThatThrownBy(() -> service.updatePreferences(auth,
+                new UpdatePreferencesRequest(true, PaymentMethod.PIX, RideCategory.MOTO)))
+                .isInstanceOf(InvalidPreferenceException.class)
+                .hasMessageContaining("Pix");
+        assertThat(user.getPreferredPaymentMethod()).isEqualTo(PaymentMethod.DINHEIRO);
+        assertThat(user.getPreferredCategory()).isNull();
+        assertThat(user.isMarketingOptIn()).isFalse();
+
+        assertThat(service.updatePreferences(auth,
+                new UpdatePreferencesRequest(false, PaymentMethod.DINHEIRO, null)).preferredPaymentMethod())
+                .isEqualTo(PaymentMethod.DINHEIRO);
     }
 
     @Test
