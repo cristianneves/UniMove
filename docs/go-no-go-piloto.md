@@ -4,7 +4,7 @@ Card: **[RELEASE][P0] Critérios objetivos de piloto e Go/No-Go**. Piloto: Reman
 
 Este documento **não dá porcentagem de prontidão**. Cada critério tem dono, evidência e status. A decisão só é **Go** quando todos os critérios bloqueantes estiverem ✅ ou tiverem exceção aceita e assinada na seção 4.
 
-Estado em 10/10/2026: **NO-GO**. O backend está pronto (seção 2). Faltam critérios de app, de aparelho e de infraestrutura (seção 3).
+Estado em 10/10/2026: **NO-GO**. O backend dos cards está entregue (seção 2). Faltam três pendências de backend (seção 2.1) e os critérios de app, de aparelho e de infraestrutura (seção 3).
 
 ## 1. Decisões de escopo (por escrito)
 
@@ -27,8 +27,16 @@ Estado em 10/10/2026: **NO-GO**. O backend está pronto (seção 2). Faltam crit
 | Health, readiness com banco, versão e commit publicados | `ObservabilityIT`; `/actuator/health/readiness`, `/actuator/info` |
 | V19 analisada e travada; backup e rollback documentados | `DestructiveMigrationGuardTest` + boot real bloqueado; `docs/homologacao-runbook.md` §1 e §3 |
 | Smoke reproduzível | `scripts/smoke.sh`, validado localmente (11/11) |
-| Testes de contrato barram o merge | CI com Postgres 16 de serviço roda os 23 ITs em todo PR |
+| Testes de contrato barram o merge | CI com Postgres 16 de serviço configurado para rodar os 23 ITs em todo PR (primeira execução no GitHub pendente: B2) |
 | Matriz de requisitos | `docs/matriz-requisitos-mvp.md` |
+
+## 2.1 Pendências de backend: ⏳ abertas
+
+| # | Pendência | Dono |
+|---|---|---|
+| B1 | `PUT /users/me/preferences` aceita `preferredPaymentMethod=PIX` com o Pix desligado: o app pode pré-selecionar Pix e levar 409 no `confirm-payment`. Responder 400 ao salvar Pix desligado | backend |
+| B2 | Primeira execução dos ITs no CI do GitHub (só roda com o PR aberto) | backend |
+| B3 | PR `feature/mvp-p0-backend` → `main` revisado (Codex) e mergeado; sem isso nada chega ao Render | backend |
 
 ## 3. Critérios bloqueantes: ⏳ pendentes (fora deste repositório)
 
