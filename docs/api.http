@@ -193,6 +193,31 @@ Content-Type: application/json
   "cidade": "Remanso"
 }
 
+### 1.7 Esqueci minha senha — desafio de recuperacao (publico)
+# Mesmo fluxo reverso do WhatsApp, mas o numero PRECISA ter conta: numero sem
+# conta volta REJECTED com PHONE_NOT_REGISTERED. Depois rode 0.2 com o "from"
+# do usuario (ex.: 5517999990001) e 0.3 para pegar o verificationToken.
+# O token de recuperacao nao serve para cadastro, e vice-versa (400).
+POST {{host}}/auth/phone/challenge
+Content-Type: application/json
+
+{ "purpose": "PASSWORD_RESET" }
+
+> {%
+    client.global.set("challengeId", response.body.challengeId);
+    client.global.set("challengeCode", response.body.code);
+%}
+
+### 1.8 Esqueci minha senha — definir a senha nova (esperado: 204)
+# Revoga as sessoes anteriores (401 nos tokens velhos). O app segue para 1.4.
+POST {{host}}/auth/password/reset
+Content-Type: application/json
+
+{
+  "verificationToken": "{{verificationToken}}",
+  "newPassword": "senhaNova123"
+}
+
 ### 1.6b Login social sem verificacao de telefone (esperado: 400)
 POST {{host}}/auth/social/register
 Content-Type: application/json

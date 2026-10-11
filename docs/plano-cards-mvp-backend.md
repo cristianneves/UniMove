@@ -56,6 +56,7 @@ A parte de backend está entregue em todos os 7. Nenhum vai para **Concluídas**
 
 ## 6. Pendências de backend (abertas)
 
-- [ ] `PUT /users/me/preferences` ainda aceita `preferredPaymentMethod=PIX` com `PAYMENT_PIX_ENABLED=false`. O app pode pré-selecionar Pix e só receber o 409 no `confirm-payment`. Correção sugerida: 400 ao salvar Pix com ele desligado (o 409 do `confirm-payment` segue como segunda barreira)
+- [x] ~~`PUT /users/me/preferences` ainda aceita `preferredPaymentMethod=PIX` com `PAYMENT_PIX_ENABLED=false`. O app pode pré-selecionar Pix e só receber o 409 no `confirm-payment`. Correção sugerida: 400 ao salvar Pix com ele desligado (o 409 do `confirm-payment` segue como segunda barreira)~~ corrigido em 11/10/2026 (400)
 - [ ] ITs no CI ainda não executados no GitHub: o job `test` com Postgres de serviço só roda quando o PR for aberto. Conferir que passa
-- [ ] PR `feature/mvp-p0-backend` → `main`: abrir, passar pela revisão do Codex e fazer o merge. Até lá nada disso chega ao Render
+- [x] PR `feature/mvp-p0-backend` → `main` mergeado (PR #26)
+- [x] Recuperação de senha sem sessão (card [ÉPICO][AUTH]): desafio WhatsApp `PASSWORD_RESET` + `POST /auth/password/reset` (11/10/2026)

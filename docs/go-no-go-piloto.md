@@ -4,7 +4,7 @@ Card: **[RELEASE][P0] Critérios objetivos de piloto e Go/No-Go**. Piloto: Reman
 
 Este documento **não dá porcentagem de prontidão**. Cada critério tem dono, evidência e status. A decisão só é **Go** quando todos os critérios bloqueantes estiverem ✅ ou tiverem exceção aceita e assinada na seção 4.
 
-Estado em 10/10/2026: **NO-GO**. O backend dos cards está entregue (seção 2). Faltam três pendências de backend (seção 2.1) e os critérios de app, de aparelho e de infraestrutura (seção 3).
+Estado em 10/10/2026: **NO-GO**. O backend dos cards está entregue (seção 2). Falta uma pendência de backend, a primeira execução dos ITs no CI do GitHub (seção 2.1, B2) e os critérios de app, de aparelho e de infraestrutura (seção 3).
 
 ## 1. Decisões de escopo (por escrito)
 
@@ -34,9 +34,9 @@ Estado em 10/10/2026: **NO-GO**. O backend dos cards está entregue (seção 2).
 
 | # | Pendência | Dono |
 |---|---|---|
-| B1 | `PUT /users/me/preferences` aceita `preferredPaymentMethod=PIX` com o Pix desligado: o app pode pré-selecionar Pix e levar 409 no `confirm-payment`. Responder 400 ao salvar Pix desligado | backend |
+| ~~B1~~ ✅ | `PUT /users/me/preferences` com `preferredPaymentMethod=PIX` e o Pix desligado → 400 (11/10/2026, `AccountPrivacyServiceTest`) | backend |
 | B2 | Primeira execução dos ITs no CI do GitHub (só roda com o PR aberto) | backend |
-| B3 | PR `feature/mvp-p0-backend` → `main` revisado (Codex) e mergeado; sem isso nada chega ao Render | backend |
+| ~~B3~~ ✅ | PR `feature/mvp-p0-backend` → `main` mergeado (PR #26) | backend |
 
 ## 3. Critérios bloqueantes: ⏳ pendentes (fora deste repositório)
 
