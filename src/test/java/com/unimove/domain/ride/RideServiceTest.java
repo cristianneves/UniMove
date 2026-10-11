@@ -428,6 +428,7 @@ class RideServiceTest {
     void confirmPaymentPixGeneratesPayloadAndPublishesToMural() {
         Ride ride = ridePending(pax.userId());
         when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+        when(paymentService.isPixEnabled()).thenReturn(true);
         when(paymentService.generatePixPayload(eq(ride.getId()), any(BigDecimal.class)))
                 .thenReturn("BR-CODE-FAKE");
 
@@ -1124,11 +1125,24 @@ class RideServiceTest {
     void confirmPixIsSimulated() {
         Ride ride = ridePending(pax.userId());
         when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+        when(paymentService.isPixEnabled()).thenReturn(true);
         when(paymentService.generatePixPayload(any(), any())).thenReturn("payload");
 
         RideResponse resp = rideService.confirmPayment(pax, ride.getId(), new ConfirmPaymentRequest(PaymentMethod.PIX));
 
         assertThat(resp.paymentStatus()).isEqualTo(PaymentStatus.SIMULATED);
+    }
+
+    @Test
+    @DisplayName("confirm-payment PIX com Pix desligado (piloto so dinheiro) → 409, sem payload e corrida pendente")
+    void confirmPixDisabledRejected() {
+        Ride ride = ridePending(pax.userId());
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        assertThatThrownBy(() -> rideService.confirmPayment(pax, ride.getId(), new ConfirmPaymentRequest(PaymentMethod.PIX)))
+                .isInstanceOf(PaymentMethodUnavailableException.class);
+        assertThat(ride.getStatus()).isEqualTo(RideStatus.PENDING_PAYMENT);
+        verify(paymentService, never()).generatePixPayload(any(), any());
     }
 
     @Test
@@ -1148,6 +1162,7 @@ class RideServiceTest {
     void changeWithPixRejected() {
         Ride ride = ridePending(pax.userId());
         when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+        when(paymentService.isPixEnabled()).thenReturn(true);
 
         assertThatThrownBy(() -> rideService.confirmPayment(pax, ride.getId(),
                 new ConfirmPaymentRequest(PaymentMethod.PIX, new BigDecimal("50.00"))))

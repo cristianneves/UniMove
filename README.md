@@ -62,7 +62,18 @@ IT_DATABASE_URL=jdbc:postgresql://localhost:55432/postgres ./mvnw verify
 docker stop unimove-it
 ```
 
-(`IT_DATABASE_USER`/`IT_DATABASE_PASSWORD` tem default `postgres`/`it`. Testcontainers nao e usado porque nao roda no Docker Desktop do time.)
+(`IT_DATABASE_USER`/`IT_DATABASE_PASSWORD` tem default `postgres`/`it`. Testcontainers nao e usado porque nao roda no Docker Desktop do time.) No CI um Postgres 16 de servico roda os IT em todo PR.
+
+Os IT de contrato (`AuthContractIT`, `RideJourneyIT`) sao a referencia do que o app consome; a matriz RF/RNF com a evidencia de cada requisito esta em [`docs/matriz-requisitos-mvp.md`](./docs/matriz-requisitos-mvp.md).
+
+### Smoke de um ambiente
+
+```bash
+scripts/smoke.sh https://<api>                                       # health, cidades, termos, desafio, 401
+SMOKE_EMAIL=... SMOKE_PASSWORD=... scripts/smoke.sh https://<api>    # + login, perfil, historico
+```
+
+Nao destrutivo; sai com 1 em qualquer falha. Ver `docs/homologacao-runbook.md` §7.2.
 
 ---
 
@@ -143,6 +154,8 @@ com.unimove
 | `RATE_LIMIT_AUTH_MAX` / `RATE_LIMIT_AUTH_WINDOW_MINUTES` | `30` / `10` | nao — login/cadastro/social por IP |
 | `RATE_LIMIT_MAPS_MAX` / `RATE_LIMIT_MAPS_WINDOW_MINUTES` | `60` / `1`  | nao — `/maps/*` por usuario |
 | `DRIVER_LOCATION_MAX_AGE_SECONDS` / `_MAX_ACCURACY_M` / `_MAX_SPEED_KMH` | `120` / `100` / `180` | nao — sanidade do GPS |
+| `PAYMENT_PIX_ENABLED` | `false`                            | nao — piloto **so dinheiro**: Pix (simulado, sem PSP) responde 409. Ligar so com PSP real |
+| `UNIMOVE_ALLOW_DESTRUCTIVE_V19` | `false`                  | nao — libera a V19 (apaga usuarios/corridas) num banco abaixo dela com dados; sem isso o boot aborta |
 | `PORT`                | —                                  | nao — injetado pelo Render; tem precedencia sobre `SERVER_PORT` |
 | `DOMAIN`              | —                                  | so no `docker-compose.prod.yml` (self-host) — dominio que o Caddy usa no TLS |
 | `IMAGE_TAG`           | `latest`                           | so no `docker-compose.prod.yml` (self-host) |
@@ -166,10 +179,14 @@ Veja `.env.example` para o template completo.
 Push na `main` dispara o pipeline em [`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml):
 
 ```
-[test]   mvn -B verify (422 testes, ~1min, sem Docker/Postgres)
+[test]   mvn -B verify (473 unitarios + 23 IT contra Postgres 16 de servico)
 [build]  buildx --platform linux/amd64 -> ghcr.io/cristianneves/unimove:<sha> + :latest
 [deploy] deploy hook do Render com imgURL=<sha>, depois espera /actuator/health
 ```
+
+Observabilidade publica: `/actuator/health` (so status), `/actuator/health/liveness`,
+`/actuator/health/readiness` (inclui o banco; use no monitor externo) e `/actuator/info`
+(versao + commit do build). O resto do actuator nao e exposto.
 
 Pull request na `main` roda **so** o job de testes — funciona como gate de merge.
 
@@ -255,7 +272,7 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 
 ### Testes
 
-Cobertura atual (`mvn test`) — **461 testes unitarios** + **7 de integracao** (`mvn verify` com `IT_DATABASE_URL`). Reauditoria de 10/10/2026: `RideIT` (aceite concorrente por dois motoristas → 200/409, clique duplo no pedido, `?sort=` invalido → 400, link de compartilhamento), `DriverDocumentIT` (envio duplicado concorrente → 201/409), `SessionAndDocsIT` (revogacao por troca de cidade, login do Swagger), alem de `RideShareServiceTest`, `DocsAuthenticationProviderTest`, `DocsSecurityWebMvcTest`, `VehiclePlateTest` e `GlobalExceptionHandlerTest`. Segundo ciclo: `NotificationServiceTest`, `FieldCryptoTest`, `FieldCryptoSpringWiringTest`, `CnhTest`, `UserStreamRegistryTest`, `ClientIpTest`, `RideRetentionSchedulerTest`, `DocumentRetentionSchedulerTest`, `AdminRideControllerWebMvcTest` e casos novos nos testes de servico. Primeiro ciclo:
+Cobertura atual (`mvn test`) — **473 testes unitarios** + **23 de integracao** (`mvn verify` com `IT_DATABASE_URL`). Cards MVP de 10/10/2026: `AuthContractIT` (cadastro real com desafio WhatsApp, token de uso unico, cidade por slug, 401/403), `RideJourneyIT` (jornada passageiro × 2 motoristas × admin com SSE e chat reais, piloto so dinheiro), `ObservabilityIT` (health/probes/info) e `DestructiveMigrationGuardTest` (trava da V19). Go/No-Go do piloto em [`docs/go-no-go-piloto.md`](./docs/go-no-go-piloto.md). Reauditoria de 10/10/2026: `RideIT` (aceite concorrente por dois motoristas → 200/409, clique duplo no pedido, `?sort=` invalido → 400, link de compartilhamento), `DriverDocumentIT` (envio duplicado concorrente → 201/409), `SessionAndDocsIT` (revogacao por troca de cidade, login do Swagger), alem de `RideShareServiceTest`, `DocsAuthenticationProviderTest`, `DocsSecurityWebMvcTest`, `VehiclePlateTest` e `GlobalExceptionHandlerTest`. Segundo ciclo: `NotificationServiceTest`, `FieldCryptoTest`, `FieldCryptoSpringWiringTest`, `CnhTest`, `UserStreamRegistryTest`, `ClientIpTest`, `RideRetentionSchedulerTest`, `DocumentRetentionSchedulerTest`, `AdminRideControllerWebMvcTest` e casos novos nos testes de servico. Primeiro ciclo:
 
 - `SecurityWebMvcTest` — cadeia de seguranca real: 401 sem/token adulterado, 403 por role, conta suspensa (403) e excluida (401) com token ainda valido, rota publica com token bloqueado, acesso cruzado (BOLA)
 - `RateLimitFilterTest`, `UserAccountServiceTest`, `DriverServiceTest`, `AdminAuditServiceTest`

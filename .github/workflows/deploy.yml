@@ -22,6 +22,20 @@ jobs:
   test:
     name: Testes
     runs-on: ubuntu-latest
+    # Postgres real para os *IT (contratos HTTP, jornada da corrida, trava da
+    # V19). Sem ele os IT sao pulados e o merge passaria sem prova-los.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: it
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -31,10 +45,11 @@ jobs:
           java-version: '21'
           cache: maven
 
-      # A suite e toda unitaria / @WebMvcTest: nao precisa de Postgres nem
-      # de Docker. Roda em ~1min.
+      # Unitarios + *IT contra o Postgres do service acima.
       - name: mvn verify
-        run: mvn -B verify
+        env:
+          IT_DATABASE_URL: jdbc:postgresql://localhost:5432/postgres
+        run: mvn -B verify -Dbuild.commit=${{ github.sha }}
 
       # Reaproveitado pelo job de build: evita recompilar.
       - name: Preparar app.jar

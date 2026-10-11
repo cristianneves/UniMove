@@ -301,7 +301,8 @@ Content-Type: application/json
 
 > {% client.global.set("rideId", response.body.id); %}
 
-### 4.2 Confirmar pagamento — PIX (gera BR Code simulado)
+### 4.2 Confirmar pagamento — PIX: 409 no piloto so dinheiro (PAYMENT_PIX_ENABLED=false).
+# Com a flag ligada gera BR Code SIMULADO (paymentStatus=SIMULATED, nunca recebimento).
 POST {{host}}/rides/{{rideId}}/confirm-payment
 Authorization: Bearer {{passageiroToken}}
 Content-Type: application/json
